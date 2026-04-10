@@ -1,8 +1,14 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 
-import { levelTheme } from '../data'
-import type { DetectionBadge, VisionFrame } from '../types'
-import { formatSigned, getAnnotationTheme, getSteeringDirection, humanizeAction, toPercent } from '../utils'
+import {
+  formatSigned,
+  getAnnotationTheme,
+  getSteeringDirection,
+  humanizeAction,
+  levelTheme,
+  toPercent,
+} from '../data'
+import type { DetectionBadge, VisionFrame } from '../data'
 
 type DashboardInsightsProps = {
   currentFrame: VisionFrame
@@ -12,15 +18,13 @@ type DashboardInsightsProps = {
 type MetricCardProps = {
   label: string
   value: string
-  detail: string
 }
 
-function MetricCard({ label, value, detail }: MetricCardProps) {
+function MetricCard({ label, value }: MetricCardProps) {
   return (
-    <article className="rounded-2xl border border-white/6 bg-[#141518] p-3.5 shadow-[0_14px_30px_rgba(0,0,0,0.18)]">
+    <article className="rounded-2xl border border-white/6 bg-[#141518] px-4 py-3 shadow-[0_14px_30px_rgba(0,0,0,0.18)]">
       <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-      <p className="mt-2 text-lg font-semibold tabular-nums text-zinc-100">{value}</p>
-      <p className="mt-1 text-sm text-zinc-500">{detail}</p>
+      <p className="mt-8 text-[1.7rem] font-semibold leading-none tabular-nums text-zinc-100">{value}</p>
     </article>
   )
 }
@@ -28,65 +32,65 @@ function MetricCard({ label, value, detail }: MetricCardProps) {
 export function DashboardInsights({ currentFrame, detectionBadges }: DashboardInsightsProps) {
   const levelStyle = levelTheme[currentFrame.danger_reasoning.level]
   const steeringDirection = getSteeringDirection(currentFrame.steering.steering_angle_deg)
+  const actionLabel = humanizeAction(currentFrame.steering.recommended_action)
   const summaryMetrics = [
     {
       label: 'Speed',
       value: toPercent(currentFrame.steering.speed_factor),
-      detail: currentFrame.steering.speed_factor >= 0.5 ? 'Normal' : 'Reduced',
     },
     {
       label: 'Brake',
       value: toPercent(currentFrame.steering.brake_factor),
-      detail: currentFrame.steering.brake_factor > 0 ? 'Applied' : 'None',
     },
     {
       label: 'Objects',
       value: String(currentFrame.annotations.length),
-      detail: 'Detected',
     },
     {
       label: 'Steering',
       value: `${formatSigned(currentFrame.steering.steering_angle_deg)}°`,
-      detail: currentFrame.steering.steering_angle_deg >= 0 ? 'Right' : 'Left',
     },
   ]
   const visibleBadges = detectionBadges.slice(0, 4)
 
   return (
     <>
-      <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,320px)]">
-        <article className="rounded-2xl border border-white/6 bg-[#15171a] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.2)]">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Current Decision</p>
-          <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-3">
-              <div className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${levelStyle.badge}`}>
-                {currentFrame.danger_reasoning.level} Risk
-              </div>
-              <div>
-                <p className="text-3xl font-semibold tabular-nums text-white">
-                  {currentFrame.danger_reasoning.score.toFixed(2)}
-                </p>
-                <p className="mt-1 text-sm text-zinc-400">{currentFrame.danger_reasoning.primary_reason}</p>
-              </div>
+      <section className="rounded-[1.5rem] border border-[#31362f] bg-[linear-gradient(135deg,#20271d_0%,#1a1f1a_58%,#141716_100%)] px-5 py-4 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#a7b58f]">
+          Recommended Action
+        </p>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2.5">
+              {steeringDirection === 'left' ? <ArrowLeft className="h-5 w-5 shrink-0 text-[#d9e8b4]" /> : null}
+              {steeringDirection === 'right' ? <ArrowRight className="h-5 w-5 shrink-0 text-[#d9e8b4]" /> : null}
+              <h2 className="text-[1.5rem] font-semibold tracking-tight text-white sm:text-[1.7rem]">
+                {actionLabel}
+              </h2>
             </div>
-            <div className="max-w-sm rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Recommended Action</p>
-              <div className="mt-2 flex items-center gap-2 text-lg font-semibold text-white">
-                {steeringDirection === 'left' ? <ArrowLeft className="h-5 w-5 text-amber-300" /> : null}
-                {steeringDirection === 'right' ? <ArrowRight className="h-5 w-5 text-amber-300" /> : null}
-                <span>{humanizeAction(currentFrame.steering.recommended_action)}</span>
-              </div>
-            </div>
+            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-zinc-400">
+              {currentFrame.danger_reasoning.primary_reason}
+            </p>
           </div>
-        </article>
 
-        <aside className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${levelStyle.badge}`}>
+              {currentFrame.danger_reasoning.level} risk
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-medium uppercase tracking-[0.16em] text-zinc-200">
+              Score {currentFrame.danger_reasoning.score.toFixed(2)}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <aside className="grid grid-cols-2 gap-3 col-span-2 xl:col-span-4 xl:grid-cols-4">
           {summaryMetrics.map((metric) => (
             <MetricCard
               key={metric.label}
               label={metric.label}
               value={metric.value}
-              detail={metric.detail}
             />
           ))}
         </aside>

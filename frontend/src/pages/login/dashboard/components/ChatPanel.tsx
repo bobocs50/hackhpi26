@@ -1,12 +1,18 @@
 import { useState } from 'react'
 import { Bot, SendHorizonal } from 'lucide-react'
 
-import type { ChatMessage, DetectionBadge, VisionFrame } from '../types'
-import { capitalize, humanizeAction } from '../utils'
+import { capitalize, humanizeAction } from '../data'
+import type { DetectionBadge, VisionFrame } from '../data'
 
 type ChatPanelProps = {
   currentFrame: VisionFrame
   detectionBadges: DetectionBadge[]
+}
+
+type ChatMessage = {
+  id: string
+  role: 'assistant' | 'user'
+  text: string
 }
 
 function buildInitialMessages(frame: VisionFrame, detectionBadges: DetectionBadge[]): ChatMessage[] {

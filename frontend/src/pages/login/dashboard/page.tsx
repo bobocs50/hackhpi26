@@ -4,12 +4,11 @@ import { DashboardHeader } from './components/DashboardHeader'
 import { ChatPanel } from './components/ChatPanel'
 import { DashboardInsights } from './components/DashboardInsights'
 import { HeroPanel } from './components/HeroPanel'
-import { ReportView } from '../report/ReportView'
-import { UploadView } from '../upload/UploadView'
-import { visionRun } from './data'
-import { getAnnotationTheme } from './utils'
+import { ReportPage } from '../report/page'
+import { UploadPage } from '../upload/page'
+import { getAnnotationTheme, visionRun } from './data'
 
-function App() {
+function DashboardPage() {
   const [activeView, setActiveView] = useState<'upload' | 'dashboard' | 'report'>('upload')
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -57,7 +56,7 @@ function App() {
       <DashboardHeader activeView={activeView} onSelectView={setActiveView} />
 
       {activeView === 'upload' ? (
-        <UploadView />
+        <UploadPage />
       ) : activeView === 'dashboard' ? (
         <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-4 px-6 py-5">
           <section className="px-1">
@@ -91,10 +90,10 @@ function App() {
           </section>
         </div>
       ) : (
-        <ReportView run={visionRun} />
+        <ReportPage run={visionRun} />
       )}
     </main>
   )
 }
 
-export default App
+export default DashboardPage

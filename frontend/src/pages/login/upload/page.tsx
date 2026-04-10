@@ -1,4 +1,4 @@
-export function UploadView() {
+export function UploadPage() {
   return (
     <div className="mx-auto flex min-h-[calc(100vh-73px)] w-full max-w-5xl items-center px-6 py-8">
       <section className="w-full rounded-3xl border border-dashed border-[#4a5447] bg-[linear-gradient(180deg,#171a1c_0%,#111315_100%)] p-6 shadow-[0_24px_60px_rgba(0,0,0,0.3)] sm:p-8">

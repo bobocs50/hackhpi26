@@ -1,8 +1,13 @@
-import { levelTheme } from '../data'
 import { Pause, Play } from 'lucide-react'
 
-import type { VisionFrame, VisionRun } from '../types'
-import { capitalize, formatSeconds, getAnnotationTheme, humanizeAction } from '../utils'
+import {
+  capitalize,
+  formatSeconds,
+  getAnnotationTheme,
+  humanizeAction,
+  levelTheme,
+} from '../data'
+import type { VisionFrame, VisionRun } from '../data'
 
 type HeroPanelProps = {
   currentFrame: VisionFrame
