@@ -1,0 +1,275 @@
+{
+  "run_id": "demo-run-001",
+  "source": {
+    "input_type": "frame_folder",
+    "folder_name": "field_pass_north_plot_frames",
+    "captured_at": "2026-04-10T09:14:22Z",
+    "location_hint": "north plot access lane",
+    "sampling_rate_fps": 1,
+    "frame_width": 1280,
+    "frame_height": 720
+  },
+  "frames": [
+    {
+      "frame_file": "frame_0000.jpg",
+      "frame_index": 0,
+      "timestamp_ms": 0,
+      "annotations": [
+        {
+          "id": "det-0000-1",
+          "label": "worker",
+          "text_label": "Worker on foot",
+          "certainty": 0.72,
+          "bbox": {
+            "x": 968,
+            "y": 314,
+            "width": 76,
+            "height": 198
+          },
+          "segment_points": [
+            {
+              "x": 978,
+              "y": 320
+            },
+            {
+              "x": 1032,
+              "y": 322
+            },
+            {
+              "x": 1041,
+              "y": 507
+            },
+            {
+              "x": 971,
+              "y": 510
+            }
+          ],
+          "reason": "Worker detected at long range near the center-right corridor."
+        }
+      ],
+      "steering": {
+        "recommended_action": "slow_forward_with_right_bias",
+        "steering_angle_deg": 4,
+        "speed_factor": 0.62,
+        "brake_factor": 0.08,
+        "vectors": {
+          "heading_vector": {
+            "x": 0,
+            "y": 1
+          },
+          "avoidance_vector": {
+            "x": 0.12,
+            "y": 0.99
+          },
+          "safe_corridor_vector": {
+            "x": 0.08,
+            "y": 1
+          }
+        },
+        "vector_reasoning": [
+          "Worker is visible ahead but still outside the immediate stop zone.",
+          "A light right bias preserves clearance early.",
+          "Forward motion can continue at reduced speed."
+        ]
+      },
+      "danger_reasoning": {
+        "level": "medium",
+        "score": 0.48,
+        "primary_reason": "Pedestrian detected ahead in the projected route.",
+        "secondary_reason": "Hazard is still at moderate distance."
+      },
+      "uncertainty": {
+        "overall": 0.24,
+        "notes": [
+          "Single-frame estimate from a folder sample.",
+          "Distance is approximate without dense temporal tracking."
+        ]
+      },
+      "summary": "Initial detection. Continue slowly with a slight right bias while monitoring the worker."
+    },
+    {
+      "frame_file": "frame_0001.jpg",
+      "frame_index": 1,
+      "timestamp_ms": 1000,
+      "annotations": [
+        {
+          "id": "det-0001-1",
+          "label": "worker",
+          "text_label": "Worker on foot",
+          "certainty": 0.96,
+          "bbox": {
+            "x": 894,
+            "y": 296,
+            "width": 118,
+            "height": 274
+          },
+          "segment_points": [
+            {
+              "x": 908,
+              "y": 303
+            },
+            {
+              "x": 980,
+              "y": 304
+            },
+            {
+              "x": 1008,
+              "y": 563
+            },
+            {
+              "x": 899,
+              "y": 568
+            }
+          ],
+          "reason": "Worker has moved closer and overlaps the main corridor."
+        },
+        {
+          "id": "det-0001-2",
+          "label": "rock",
+          "text_label": "Large rock",
+          "certainty": 0.84,
+          "bbox": {
+            "x": 614,
+            "y": 520,
+            "width": 88,
+            "height": 60
+          },
+          "segment_points": [
+            {
+              "x": 622,
+              "y": 529
+            },
+            {
+              "x": 688,
+              "y": 521
+            },
+            {
+              "x": 700,
+              "y": 572
+            },
+            {
+              "x": 618,
+              "y": 580
+            }
+          ],
+          "reason": "Rock constrains the left wheel path."
+        }
+      ],
+      "steering": {
+        "recommended_action": "brake_and_steer_right",
+        "steering_angle_deg": 8,
+        "speed_factor": 0.26,
+        "brake_factor": 0.58,
+        "vectors": {
+          "heading_vector": {
+            "x": 0,
+            "y": 1
+          },
+          "avoidance_vector": {
+            "x": 0.24,
+            "y": 0.97
+          },
+          "safe_corridor_vector": {
+            "x": 0.15,
+            "y": 0.99
+          }
+        },
+        "vector_reasoning": [
+          "The worker is now the dominant near-field hazard.",
+          "The rock on the left reduces available escape space.",
+          "Braking with a moderate right correction is the safest response."
+        ]
+      },
+      "danger_reasoning": {
+        "level": "high",
+        "score": 0.89,
+        "primary_reason": "Worker is close and overlaps the predicted route.",
+        "secondary_reason": "Rock limits left-side avoidance."
+      },
+      "uncertainty": {
+        "overall": 0.16,
+        "notes": [
+          "Worker motion is inferred from sparse one-second samples.",
+          "Obstacle contour is partially occluded by dust."
+        ]
+      },
+      "summary": "Peak risk. Brake firmly and steer right to keep distance from both the worker and the rock."
+    },
+    {
+      "frame_file": "frame_0002.jpg",
+      "frame_index": 2,
+      "timestamp_ms": 2000,
+      "annotations": [
+        {
+          "id": "det-0002-1",
+          "label": "worker",
+          "text_label": "Worker exiting lane",
+          "certainty": 0.91,
+          "bbox": {
+            "x": 1002,
+            "y": 301,
+            "width": 104,
+            "height": 267
+          },
+          "segment_points": [
+            {
+              "x": 1015,
+              "y": 308
+            },
+            {
+              "x": 1084,
+              "y": 310
+            },
+            {
+              "x": 1105,
+              "y": 563
+            },
+            {
+              "x": 1010,
+              "y": 567
+            }
+          ],
+          "reason": "Worker is clearing the driving corridor toward the right edge."
+        }
+      ],
+      "steering": {
+        "recommended_action": "resume_forward_slow",
+        "steering_angle_deg": 3.5,
+        "speed_factor": 0.48,
+        "brake_factor": 0.14,
+        "vectors": {
+          "heading_vector": {
+            "x": 0,
+            "y": 1
+          },
+          "avoidance_vector": {
+            "x": 0.1,
+            "y": 1
+          },
+          "safe_corridor_vector": {
+            "x": 0.05,
+            "y": 1
+          }
+        },
+        "vector_reasoning": [
+          "The worker is no longer centered in the path corridor.",
+          "Only a minor right offset is still needed.",
+          "The vehicle can resume cautious forward motion."
+        ]
+      },
+      "danger_reasoning": {
+        "level": "medium",
+        "score": 0.41,
+        "primary_reason": "Residual pedestrian proximity remains on the right side.",
+        "secondary_reason": "Primary route is reopening."
+      },
+      "uncertainty": {
+        "overall": 0.18,
+        "notes": [
+          "Clearance trend is inferred from sparse one-second samples."
+        ]
+      },
+      "summary": "Risk is dropping. Continue slowly until the worker is fully outside the route."
+    }
+  ]
+}

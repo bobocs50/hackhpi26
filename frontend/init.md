@@ -20,6 +20,12 @@ The dashboard should help a viewer understand:
 - Planned UI: Tailwind, shadcn/ui, Lucide React, Plotly
 - Backend contract: FastAPI + Pydantic JSON responses
 
+## UI Conventions
+
+- Use `lucide-react` as the only icon library for the dashboard
+- Use Lucide icons for nav, playback controls, status chips, and light explanatory UI
+- Do not introduce a second icon set unless Lucide cannot cover a concrete dashboard need
+
 ## Core Frontend Job
 
 The frontend is not responsible for ML logic.
