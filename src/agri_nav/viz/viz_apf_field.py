@@ -19,13 +19,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 from agri_nav.dto.config import APFConfig, SGGConfig
-from agri_nav.dto.perception import (
-    CropOccupancyGrid,
-    DangerClass,
-    KinematicsEntity,
-)
-from agri_nav.logic import apf_lateral as lat
-from agri_nav.logic import apf_longitudinal as lon
+from agri_nav.dto.perception import CropOccupancyGrid, KinematicsEntity
 from agri_nav.logic.sgg_inference import SGGInferenceConfig, infer_semantics
 from agri_nav.logic.sgg_processor import TrackedEntity, merge_perception
 from agri_nav.service.apf_service import APFService, VehicleState
@@ -168,26 +162,10 @@ def plot_apf_field(
 
 def _demo() -> None:
     """Generate a synthetic scene, infer semantics via TTC, and visualize."""
-    from agri_nav.dto.perception import EntityType
-    kins = [
-        KinematicsEntity(id=1, cls="human", x=0.5, y=4.0, vx=-0.2, vy=-1.0,
-                         detection_confidence=0.95, track_age=25),
-        KinematicsEntity(id=2, cls="tractor", x=-3.0, y=8.0, vx=0.0, vy=-0.5,
-                         detection_confidence=0.80, track_age=40),
-        KinematicsEntity(id=3, cls="bush", x=2.0, y=3.0, vx=0.0, vy=0.0,
-                         detection_confidence=0.70, track_age=60),
-        KinematicsEntity(id=4, cls="deer", x=-1.0, y=6.0, vx=0.8, vy=-0.3,
-                         detection_confidence=0.85, track_age=8),
-        KinematicsEntity(id=5, cls="post", x=3.5, y=7.0, vx=0.0, vy=0.0,
-                         detection_confidence=0.90, track_age=100),
-        KinematicsEntity(id=6, cls="dog", x=1.0, y=5.5, vx=-0.5, vy=-0.8,
-                         detection_confidence=0.88, track_age=15),
-        KinematicsEntity(id=7, cls="crop", x=4.0, y=5.0, vx=0.0, vy=0.0,
-                         detection_confidence=0.60, track_age=100,
-                         entity_type=EntityType.AREA, extent_x=2.0, extent_y=3.0),
-    ]
+    from agri_nav.demo_scene import DEMO_KINEMATICS, EGO_VY, make_crop_grid
 
-    vehicle = VehicleState(x=0.0, y=0.0, v_current=3.0, heading=0.0)
+    kins = DEMO_KINEMATICS
+    vehicle = VehicleState(x=0.0, y=0.0, v_current=EGO_VY, heading=0.0)
     inf_cfg = SGGInferenceConfig(ego_vy=vehicle.v_current)
     sems = infer_semantics(kins, inf_cfg)
 
@@ -199,9 +177,7 @@ def _demo() -> None:
     cfg_sgg = SGGConfig()
     tracked = merge_perception(kins, sems, cfg_sgg, ego_vy=vehicle.v_current)
 
-    grid_data = np.zeros((40, 40))
-    grid_data[:, 28:] = 1.0
-    crop_grid = CropOccupancyGrid(data=grid_data, resolution=0.5, origin_x=-5.0, origin_y=-2.0)
+    crop_grid = make_crop_grid()
 
     apf_cfg = APFConfig()
 

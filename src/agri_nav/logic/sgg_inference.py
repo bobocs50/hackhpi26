@@ -58,6 +58,10 @@ DEFAULT_CLASS_WEIGHTS: dict[str, float] = {
     "cone": 8.0,
     "rock": 6.0,
     "crop": -10.0,
+    # Terrain hazards (not dynamic, but the machine must avoid them)
+    "mud": 12.0,
+    "ditch": 15.0,
+    "puddle": 10.0,
 }
 
 DEFAULT_WEIGHT_UNKNOWN: float = 20.0

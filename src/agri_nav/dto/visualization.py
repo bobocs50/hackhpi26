@@ -61,6 +61,79 @@ class SGGVisualData(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Mock SGG (Initial Entity Graph) Visualization DTOs
+# ---------------------------------------------------------------------------
+
+
+class MockSGGNodeViz(BaseModel):
+    """A node in the initial mock SGG — before any danger collapse."""
+
+    id: int
+    cls: str
+    is_ego: bool
+    x: float
+    y: float
+    vx: float
+    vy: float
+    speed: float
+    danger_quality: float
+    certainty: float
+    ttc_label: str
+
+
+class MockSGGEdgeViz(BaseModel):
+    """A simple directed link between two node ids (entity or relation)."""
+
+    source_id: str = Field(description="Node key of the source (entity id or relation node id)")
+    target_id: str = Field(description="Node key of the target")
+    source_x: float
+    source_y: float
+    target_x: float
+    target_y: float
+    color: str
+
+
+class MockSGGRelationNodeViz(BaseModel):
+    """A reified relation node: the predicate becomes a visible graph node.
+
+    Example: Human ──▶ [blocking_path +0.30] ──▶ Dog
+    """
+
+    id: str = Field(description="Unique key, e.g. 'rel_1_6_blocking_path'")
+    semantic_type: str
+    danger_contribution: float = Field(description="Score added to target's danger_quality")
+    reasoning: str
+    label: str = Field(description="Short display label, e.g. 'blocking_path'")
+    source_entity_id: int
+    target_entity_id: int
+    x: float
+    y: float
+    color: str
+
+
+class MockSGGVisualData(BaseModel):
+    """Complete payload for the initial (pre-collapse) mock SGG visualization.
+
+    Relations are first-class nodes: each relationship is a diamond-shaped
+    node positioned between its source and target entities, with two
+    directed edges (source → relation → target).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str = "Mock SGG — Initial Entity Relationship Graph"
+    nodes: list[MockSGGNodeViz] = Field(default_factory=list)
+    relation_nodes: list[MockSGGRelationNodeViz] = Field(
+        default_factory=list,
+        description="Reified relation nodes (predicates as graph nodes)",
+    )
+    edges: list[MockSGGEdgeViz] = Field(
+        default_factory=list,
+        description="Directed links: entity→relation and relation→entity",
+    )
+
+
+# ---------------------------------------------------------------------------
 # APF Visualization DTOs
 # ---------------------------------------------------------------------------
 

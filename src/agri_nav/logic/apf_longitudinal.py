@@ -6,6 +6,8 @@ and braking protocol.
 
 from __future__ import annotations
 
+import math
+
 from shapely.geometry import Point, Polygon
 
 
@@ -34,8 +36,6 @@ def build_safety_corridor(
     """
     corridor_length = max(corridor_length_factor * v_current, 0.5)  # min 0.5 m
     half_w = machine_width / 2.0
-
-    import math
 
     spread = corridor_length * math.tan(min(theta_max, math.pi / 4))
 

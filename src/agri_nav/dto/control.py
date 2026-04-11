@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agri_nav.dto.visualization import APFVisualData
+
 
 class SteeringCommand(BaseModel):
     """Lateral control output — steering angle delta."""
@@ -20,8 +22,6 @@ class VelocityCommand(BaseModel):
 
     v_target: float = Field(ge=0.0, description="Target velocity [m/s]")
 
-
-from agri_nav.dto.visualization import APFVisualData
 
 class ControlOutput(BaseModel):
     """Combined control output for a single tick."""

@@ -8,7 +8,8 @@ import numpy as np
 
 from agri_nav.dto.config import APFConfig
 from agri_nav.dto.control import ControlOutput, SteeringCommand, VelocityCommand
-from agri_nav.dto.perception import CropOccupancyGrid
+from agri_nav.dto.perception import CropOccupancyGrid, DangerClass, EntityType
+from agri_nav.dto.visualization import APFEntityViz, APFVisualData
 from agri_nav.logic import apf_lateral as lat
 from agri_nav.logic import apf_longitudinal as lon
 from agri_nav.logic.sgg_processor import TrackedEntity
@@ -95,7 +96,7 @@ class APFService:
 
         for ent in entities:
             # Skip the ego node — it doesn't repel itself
-            if getattr(ent, "is_ego", False):
+            if ent.is_ego:
                 continue
 
             xp, yp = lat.predict_position(
@@ -106,7 +107,7 @@ class APFService:
                 nearest_dist = dist
 
             # Area entities use distributed sampling
-            if getattr(ent, "entity_type", None) == "area" and (ent.extent_x > 0 or ent.extent_y > 0):
+            if ent.entity_type == EntityType.AREA and (ent.extent_x > 0 or ent.extent_y > 0):
                 s_i = lat.compute_area_repulsive_vector(
                     xp,
                     yp,
@@ -194,7 +195,7 @@ class APFService:
 
         predicted_entities: list[tuple[float, float, float, float, bool]] = []
         for ent in entities:
-            if getattr(ent, "is_ego", False):
+            if ent.is_ego:
                 continue
             xp, yp = lat.predict_position(
                 ent.x, ent.y, ent.vx, ent.vy, cfg.lookahead_t
@@ -211,14 +212,11 @@ class APFService:
         # ── C. Visualization ───────────────────────────────────────────
         viz_data = None
         if render_viz:
-            from agri_nav.dto.visualization import APFVisualData, APFEntityViz
+            # Always generate a longer trajectory for visualization
+            viz_trajectory = self._predict_trajectory(entities, crop_grid, vehicle, steps=40, dt=0.15)
 
-            if trajectory is None:
-                trajectory = self._predict_trajectory(entities, crop_grid, vehicle, steps=40, dt=0.15)
-            
             # Simple downsampled mesh generation to reduce payload size
             # 20m x 20m area with 0.5m resolution
-            import numpy as np
             extent = 12.0
             res = 0.5
             x_vals = np.arange(-extent, extent, res).tolist()
@@ -228,17 +226,21 @@ class APFService:
 
             viz_entities = []
             for ent in entities:
-                if getattr(ent, "is_ego", False):
+                if ent.is_ego:
                     continue
                 xp, yp = lat.predict_position(ent.x, ent.y, ent.vx, ent.vy, cfg.lookahead_t)
                 ttc_str = f"{ent.ttc:.1f}s" if ent.ttc != float('inf') else "∞"
-                color = "#e74c3c" if ent.danger_class.name == "MUST_AVOID" else ("#2ecc71" if ent.danger_class.name == "CROSSABLE" else "#f39c12")
+                color = "#e74c3c" if ent.danger_class == DangerClass.MUST_AVOID else ("#2ecc71" if ent.danger_class == DangerClass.CROSSABLE else "#f39c12")
                 viz_entities.append(APFEntityViz(
                     id=ent.id, cls=ent.cls, x=xp, y=yp, z=0.0,
                     color=color, danger_quality=ent.danger_quality,
                     smoothed_certainty=ent.smoothed_certainty,
                     ttc_label=ttc_str, danger_class=ent.danger_class.value
                 ))
+
+            # Control arrow direction in world frame (consistent scaling)
+            actual_heading = vehicle.heading + delta_theta
+            arrow_scale = 3.0
 
             viz_data = APFVisualData(
                 x_grid=x_vals,
@@ -250,11 +252,11 @@ class APFService:
                 entities=viz_entities,
                 extent_x=extent,
                 extent_y=extent * 1.5,
-                control_steer_x=math.sin(delta_theta) * 2.0,
-                control_steer_y=math.cos(delta_theta) * v_target,
+                control_steer_x=math.sin(actual_heading) * arrow_scale,
+                control_steer_y=math.cos(actual_heading) * arrow_scale,
                 delta_theta=delta_theta,
                 v_target=v_target,
-                trajectory=trajectory,
+                trajectory=viz_trajectory,
                 corridor_xy=[(c[0] + vehicle.x, c[1] + vehicle.y) for c in corridor.exterior.coords],
             )
 
@@ -265,12 +267,11 @@ class APFService:
         )
 
     def _compute_potential_surface(self, x_range, y_range, entities, cfg):
-        import numpy as np
         X, Y = np.meshgrid(x_range, y_range)
         Z = np.zeros_like(X)
 
         for ent in entities:
-            if getattr(ent, "is_ego", False):
+            if ent.is_ego:
                 continue
             xp, yp = lat.predict_position(ent.x, ent.y, ent.vx, ent.vy, cfg.lookahead_t)
             dx = X - xp
@@ -280,7 +281,7 @@ class APFService:
 
             # Continuous scale: proportional to danger_quality
             # CROSSABLE entities get dampened, all others scale with their actual danger
-            if ent.danger_class.name == "CROSSABLE":
+            if ent.danger_class == DangerClass.CROSSABLE:
                 scale = 0.2 * ent.danger_quality
             else:
                 scale = max(ent.danger_quality, 0.05)  # floor to keep entities visible
@@ -411,14 +412,18 @@ class APFService:
             sim_veh.y += dy_raw
             sim_veh.v_current = v_speed
 
-            # Transform entities into the new ego-relative frame
+            # Transform entities into the new ego-relative frame using
+            # the actual displacement (dx_raw, dy_raw) rather than v_speed*dt
+            # to stay consistent with the Adam-optimized vehicle motion.
             d_theta_step = omega * dt
             cos_t = math.cos(-d_theta_step)
             sin_t = math.sin(-d_theta_step)
             next_ents = []
             for ent in sim_ents:
-                nx = ent.x
-                ny = ent.y - (v_speed * dt)
+                # Subtract actual ego displacement in body frame
+                nx = ent.x - dx_raw
+                ny = ent.y - dy_raw
+                # Rotate by heading change, then advance entity's own velocity
                 new_x = nx * cos_t - ny * sin_t + ent.vx * dt
                 new_y = nx * sin_t + ny * cos_t + ent.vy * dt
                 next_ents.append(TrackedEntity(**{**ent.model_dump(), "x": new_x, "y": new_y}))
@@ -442,13 +447,17 @@ class APFService:
         ys = [p[1] for p in raw_traj]
 
         smooth_xs = list(xs)
+        smooth_ys = list(ys)
         for i in range(kernel_size, n - kernel_size):
-            acc = 0.0
+            acc_x = 0.0
+            acc_y = 0.0
             for j, k_val in enumerate(kernel):
-                acc += xs[i - kernel_size + j] * k_val
-            smooth_xs[i] = acc
+                acc_x += xs[i - kernel_size + j] * k_val
+                acc_y += ys[i - kernel_size + j] * k_val
+            smooth_xs[i] = acc_x
+            smooth_ys[i] = acc_y
 
-        traj = [(smooth_xs[i], ys[i], 0.0) for i in range(n)]
+        traj = [(smooth_xs[i], smooth_ys[i], 0.0) for i in range(n)]
         return traj
 
     def _eval_potential_at(
@@ -461,7 +470,7 @@ class APFService:
         """Evaluate the scalar potential U = log1p(raw_repulsion) at a single point."""
         U = 0.0
         for ent in entities:
-            if getattr(ent, "is_ego", False):
+            if ent.is_ego:
                 continue
             xp, yp = lat.predict_position(ent.x, ent.y, ent.vx, ent.vy, cfg.lookahead_t)
             dx = px - xp
@@ -469,7 +478,7 @@ class APFService:
             dist = math.sqrt(dx**2 + dy**2) + cfg.epsilon
             decay = math.exp(-cfg.alpha_decay * max(dy, 0.0))
 
-            if ent.danger_class.name == "CROSSABLE":
+            if ent.danger_class == DangerClass.CROSSABLE:
                 scale = 0.2 * ent.danger_quality
             else:
                 scale = max(ent.danger_quality, 0.05)

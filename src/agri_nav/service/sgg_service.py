@@ -5,13 +5,22 @@ from __future__ import annotations
 import math
 
 from agri_nav.dto.config import SGGConfig
-from agri_nav.dto.perception import KinematicsEntity, SemanticEntity
+from agri_nav.dto.perception import EntityType, KinematicsEntity, SemanticEntity
+from agri_nav.dto.visualization import (
+    MockSGGVisualData,
+    SGGDistanceLineViz,
+    SGGEdgeViz,
+    SGGNodeViz,
+    SGGVisualData,
+)
 from agri_nav.logic.sgg_processor import (
     SGGOutput,
+    SceneRelationship,
     build_scene_graph,
     collapse_semantic_graph,
     infer_semantic_relations,
     merge_perception,
+    mock_sgg_entity_graph,
 )
 
 
@@ -43,9 +52,11 @@ class SGGService:
         * Merges kinematics + semantics by ID.
         * Classifies each entity and applies temporal EMA smoothing.
         * Builds the spatial scene graph (with ego node and TTC edges).
-        * Infers semantic relationships (blocking, crossing, etc.).
+        * Generates ego→entity semantic relations from kinematics.
+        * Generates entity→entity semantic relations (mock SGG or external).
         * Collapses semantic modifiers into the danger_quality.
-        * Optionally generates a Plotly JSON payload for the frontend.
+        * Optionally produces visualization payloads for both the initial
+          mock SGG graph and the final collapsed graph.
         """
         # 1. Merge and smooth
         tracked = merge_perception(
@@ -59,24 +70,36 @@ class SGGService:
         # 2. Build spatial graph (nodes without area entities but ego included)
         nodes, spatial_rels = build_scene_graph(tracked, ego_vy=ego_vy)
 
-        # 3. Infer semantic relationships
-        semantic_rels = infer_semantic_relations(nodes, ego_vy=ego_vy)
-        
-        # Add external real SGG entity relationships
-        if entity_sgg_rels:
-            semantic_rels.extend(entity_sgg_rels)
+        # 3. Ego → entity semantic relationships
+        ego_semantic_rels = infer_semantic_relations(nodes, ego_vy=ego_vy)
 
-        # 4. Collapse semantic graph (adjust danger_quality based on semantics)
-        collapsed_nodes = collapse_semantic_graph(nodes, semantic_rels)
+        # 4. Entity → entity semantic relationships
+        #    Use externally-provided SGG edges, or fall back to the mock SGG.
+        if entity_sgg_rels is not None:
+            ent_semantic_rels = list(entity_sgg_rels)
+        else:
+            ent_semantic_rels = mock_sgg_entity_graph(nodes, ego_vy=ego_vy)
+
+        # Combined semantic edges (ego + entity-to-entity)
+        all_semantic_rels = ego_semantic_rels + ent_semantic_rels
+
+        # 5. Collapse semantic graph (adjust danger_quality based on semantics)
+        collapsed_nodes = collapse_semantic_graph(nodes, all_semantic_rels)
 
         # Persist smoothed certainties for the next tick
         self._prev_smoothed = {e.id: e.smoothed_certainty for e in collapsed_nodes if not e.is_ego}
 
-        # 5. Visualization
+        # 6. Visualization
         viz_data = None
+        initial_graph_viz = None
         if render_viz:
-            from agri_nav.dto.visualization import SGGVisualData, SGGNodeViz, SGGEdgeViz, SGGDistanceLineViz
+            # 6a. Initial mock SGG graph (pre-collapse)
+            from agri_nav.viz.viz_mock_sgg import build_mock_sgg_viz
+            initial_graph_viz = build_mock_sgg_viz(
+                nodes, ego_semantic_rels, ent_semantic_rels, ego_vy=ego_vy,
+            )
 
+            # 6b. Final collapsed graph
             viz_nodes = []
             for n in collapsed_nodes:
                 ttc_str = "" if n.is_ego else ("∞" if n.ttc == float("inf") else f"{n.ttc:.1f}s")
@@ -89,7 +112,7 @@ class SGGService:
                 ))
 
             viz_edges = []
-            for rel in semantic_rels:
+            for rel in all_semantic_rels:
                 try:
                     src = next(n for n in collapsed_nodes if n.id == rel.source_id)
                     tgt = next(n for n in collapsed_nodes if n.id == rel.target_id)
@@ -107,6 +130,7 @@ class SGGService:
                     target_x=tgt.x, target_y=tgt.y,
                     label=f"{rel.semantic_label.value} ({rel.danger_modifier:+.2f})",
                     color=color,
+                    reasoning=rel.reasoning,
                 ))
 
             viz_dist_lines = []
@@ -122,14 +146,14 @@ class SGGService:
             viz_data = SGGVisualData(nodes=viz_nodes, edges=viz_edges, distance_lines=viz_dist_lines)
 
         # NOTE: APF still needs the area entities that were filtered out from the graph
-        # Let's add them back to the nodes list so APF has full knowledge
-        area_ents = [e for e in tracked if e.entity_type == "area"]
+        area_ents = [e for e in tracked if e.entity_type == EntityType.AREA]
         final_nodes = collapsed_nodes + area_ents
 
         return SGGOutput(
             nodes=final_nodes,
-            relationships=semantic_rels,
+            relationships=all_semantic_rels,
             visual_data=viz_data,
+            initial_graph_viz=initial_graph_viz,
         )
 
     def reset(self) -> None:

@@ -20,6 +20,8 @@ from agri_nav.dto.perception import (
     KinematicsEntity,
     SemanticEntity,
 )
+from agri_nav.logic.sgg_inference import compute_ttc
+from agri_nav.dto.visualization import MockSGGVisualData, SGGVisualData
 
 
 # -- Constants ---------------------------------------------------------------
@@ -46,14 +48,24 @@ class SemanticRelType(str, Enum):
 
     Each relationship carries a danger modifier that adjusts the
     danger_quality of the connected entities when the graph is collapsed.
+
+    Labels are designed for an agricultural-machine ego context.
     """
 
-    BLOCKING_PATH = "blocking_path"       # +0.3  entity is in the way
-    FOLLOWING = "following"               # +0.15 entity tailing ego
-    CROSSING = "crossing"                 # +0.25 entity cutting across
-    MOVING_AWAY = "moving_away"           # -0.2  entity leaving
-    STATIONARY_SAFE = "stationary_safe"   # -0.15 static, non-threatening
-    OCCLUDING = "occluding"               # +0.1  hiding something behind it
+    # --- Motion-based (kinematic) ---
+    BLOCKING_PATH = "blocking_path"       # +0.30  entity is in the way
+    FOLLOWING = "following"               # +0.15  entity tailing ego
+    CROSSING = "crossing"                 # +0.25  entity cutting across
+    MOVING_AWAY = "moving_away"           # -0.20  entity leaving
+    STATIONARY_SAFE = "stationary_safe"   # -0.15  static, non-threatening
+    OCCLUDING = "occluding"               # +0.10  hiding something behind it
+
+    # --- Agricultural / semantic context ---
+    HOLDING_LEASH = "holding_leash"       # +0.20  human controls an animal → animal more predictable but pair blocks more
+    FLEEING_FROM = "fleeing_from"         # +0.15  animal startled by machine noise → erratic path
+    TERRAIN_HAZARD = "terrain_hazard"     # +0.10  entity near hazardous ground (mud, ditch)
+    SHELTERING_BEHIND = "sheltering_behind"  # +0.15  animal hiding behind obstacle → surprise emergence risk
+    GRAZING = "grazing"                   # -0.10  animal is calm/feeding → low dynamic risk
 
 
 # Danger modifier lookup: positive = increases danger, negative = decreases
@@ -64,6 +76,11 @@ SEMANTIC_DANGER_MODIFIERS: dict[SemanticRelType, float] = {
     SemanticRelType.MOVING_AWAY: -0.20,
     SemanticRelType.STATIONARY_SAFE: -0.15,
     SemanticRelType.OCCLUDING: +0.10,
+    SemanticRelType.HOLDING_LEASH: +0.20,
+    SemanticRelType.FLEEING_FROM: +0.15,
+    SemanticRelType.TERRAIN_HAZARD: +0.10,
+    SemanticRelType.SHELTERING_BEHIND: +0.15,
+    SemanticRelType.GRAZING: -0.10,
 }
 
 
@@ -137,8 +154,6 @@ class TrackedEntity(BaseModel):
         return HomogeneousCoord(x=self.x, y=self.y, w=1.0)
 
 
-from agri_nav.dto.visualization import SGGVisualData
-
 class SGGOutput(BaseModel):
     """Combined output of the SGG inference pipeline."""
 
@@ -149,6 +164,10 @@ class SGGOutput(BaseModel):
     visual_data: SGGVisualData | None = Field(
         default=None,
         description="Structured data payload for frontend rendering, if generated",
+    )
+    initial_graph_viz: MockSGGVisualData | None = Field(
+        default=None,
+        description="Visualization of the initial mock SGG before collapse",
     )
 
 
@@ -217,33 +236,6 @@ def smooth_certainty(
 
 
 # ---------------------------------------------------------------------------
-# TTC computation (for scene-graph depth)
-# ---------------------------------------------------------------------------
-
-
-def _compute_ttc(
-    x: float,
-    y: float,
-    vx: float,
-    vy: float,
-    ego_vx: float,
-    ego_vy: float,
-    epsilon: float = 0.1,
-) -> float:
-    """Compute time-to-collision with the ego vehicle at the origin."""
-    dist = math.sqrt(x**2 + y**2)
-    if dist < 1e-9:
-        return 0.0
-    rel_vx = vx - ego_vx
-    rel_vy = vy - ego_vy
-    ux, uy = -x / dist, -y / dist
-    closing = rel_vx * ux + rel_vy * uy
-    if closing <= 0:
-        return float("inf")
-    return dist / max(epsilon, closing)
-
-
-# ---------------------------------------------------------------------------
 # Merge perception streams
 # ---------------------------------------------------------------------------
 
@@ -293,7 +285,7 @@ def merge_perception(
             prev_smoothed.get(kin.id, sem.certainty),
             config.ema_alpha,
         )
-        ttc = _compute_ttc(kin.x, kin.y, kin.vx, kin.vy, ego_vx, ego_vy)
+        ttc = compute_ttc(kin.x, kin.y, kin.vx, kin.vy, ego_vx, ego_vy, epsilon=0.1)
 
         results.append(
             TrackedEntity(
@@ -432,30 +424,65 @@ def mock_llm_evaluate_danger(
     source_cls: str, target_cls: str, sem_type: SemanticRelType, speed: float, closing_speed: float
 ) -> tuple[float, str]:
     """Mock LLM structured evaluation of entity-level danger.
-    
-    Given the classes and kinematic context of two entities, this returns
-    [danger_contribution_score, reasoning].
+
+    Produces a (danger_contribution, reasoning) pair that simulates what
+    a vision-language model would output given the agricultural-machine
+    ego context.  The reasoning references concrete field scenarios.
     """
-    if sem_type == SemanticRelType.BLOCKING_PATH:
-        score = 0.30
-        reasoning = f"The {target_cls} is directly in the path and moving slowly ({speed:.1f}m/s), creating an immediate obstruction risk."
-    elif sem_type == SemanticRelType.CROSSING:
-        score = 0.25
-        reasoning = f"The {target_cls} is cutting across the trajectory at a high lateral speed, creating a collision risk."
-    elif sem_type == SemanticRelType.FOLLOWING:
-        score = 0.15
-        reasoning = f"The {target_cls} is tailing the {source_cls}; minor risk of rear-end if braking suddenly."
-    elif sem_type == SemanticRelType.MOVING_AWAY:
-        score = -0.20
-        reasoning = f"The {target_cls} is actively increasing its distance from {source_cls} (closing_speed={closing_speed:.1f}m/s), reducing risk."
-    elif sem_type == SemanticRelType.STATIONARY_SAFE:
-        score = -0.15
-        reasoning = f"The {target_cls} is completely stationary (0.0m/s) and off the main path, presenting minimal dynamic risk."
-    else:
-        score = 0.10
-        reasoning = f"The {target_cls} presents a generic hazard to {source_cls}."
-        
-    return score, reasoning
+    modifier = SEMANTIC_DANGER_MODIFIERS[sem_type]
+
+    _reasoning: dict[SemanticRelType, str] = {
+        SemanticRelType.BLOCKING_PATH: (
+            f"The {target_cls} is directly ahead of {source_cls} and closing at "
+            f"{closing_speed:.1f} m/s — the harvester must slow or steer around."
+        ),
+        SemanticRelType.CROSSING: (
+            f"The {target_cls} is cutting laterally across the {source_cls}'s path "
+            f"at {speed:.1f} m/s — collision risk if the machine does not yield."
+        ),
+        SemanticRelType.FOLLOWING: (
+            f"The {target_cls} is trailing {source_cls}; if the machine brakes "
+            f"suddenly the {target_cls} may not react in time."
+        ),
+        SemanticRelType.MOVING_AWAY: (
+            f"The {target_cls} is moving away from {source_cls} "
+            f"(closing {closing_speed:.1f} m/s), reducing collision risk."
+        ),
+        SemanticRelType.STATIONARY_SAFE: (
+            f"The {target_cls} is stationary and not in the active working lane, "
+            f"posing minimal dynamic risk to {source_cls}."
+        ),
+        SemanticRelType.OCCLUDING: (
+            f"The {target_cls} is between {source_cls} and the machine, potentially "
+            f"hiding {source_cls} from the perception system — surprise emergence risk."
+        ),
+        SemanticRelType.HOLDING_LEASH: (
+            f"The {source_cls} appears to be controlling the {target_cls} (handler/leash). "
+            f"The pair moves as a unit, increasing the combined footprint that blocks "
+            f"the machine's path."
+        ),
+        SemanticRelType.FLEEING_FROM: (
+            f"The {source_cls} is fleeing at {speed:.1f} m/s, likely startled by machine "
+            f"noise or vibrations — its trajectory is erratic and hard to predict."
+        ),
+        SemanticRelType.TERRAIN_HAZARD: (
+            f"The {source_cls} is near {target_cls} (hazardous terrain). If the "
+            f"machine enters this zone it risks getting stuck or damaging the field."
+        ),
+        SemanticRelType.SHELTERING_BEHIND: (
+            f"The {source_cls} is sheltering behind the {target_cls} — it may "
+            f"emerge suddenly into the machine's path when startled."
+        ),
+        SemanticRelType.GRAZING: (
+            f"The {target_cls} is calmly grazing at {speed:.1f} m/s and unlikely "
+            f"to make sudden movements, but the machine should still give a wide berth."
+        ),
+    }
+
+    reasoning = _reasoning.get(
+        sem_type, f"The {target_cls} presents a generic hazard to {source_cls}."
+    )
+    return modifier, reasoning
 
 
 def infer_semantic_relations(
@@ -465,10 +492,12 @@ def infer_semantic_relations(
 ) -> list[SceneRelationship]:
     """Infer semantic relationships between ego and entities from kinematics.
 
-    Uses velocity/position heuristics to assign high-level semantic labels
-    (BLOCKING_PATH, CROSSING, MOVING_AWAY, STATIONARY_SAFE, FOLLOWING).
-    These simulate what an upstream SGG model would produce.
+    Uses velocity/position heuristics combined with entity-class knowledge
+    to assign semantic labels relevant to an agricultural machine context.
     """
+    _TERRAIN = {"mud", "ditch", "puddle", "water"}
+    _ANIMALS = {"dog", "deer", "animal", "cat", "bird"}
+
     ego_id = EGO_ID
     rels: list[SceneRelationship] = []
 
@@ -491,8 +520,18 @@ def infer_semantic_relations(
 
         speed = math.sqrt(ent.vx**2 + ent.vy**2)
 
-        # Classify the relationship
-        if speed < 0.05:
+        # --- Agricultural semantic rules ---
+        # Terrain hazards directly ahead
+        if ent.cls in _TERRAIN:
+            sem_type = SemanticRelType.TERRAIN_HAZARD
+        # Fast animal fleeing from the machine
+        elif ent.cls in _ANIMALS and speed > 0.5 and closing_speed > 0.3:
+            sem_type = SemanticRelType.FLEEING_FROM
+        # Slow animal grazing
+        elif ent.cls in _ANIMALS and speed < 0.15:
+            sem_type = SemanticRelType.GRAZING
+        # --- Kinematic fallback ---
+        elif speed < 0.05:
             sem_type = SemanticRelType.STATIONARY_SAFE
         elif closing_speed > 1.0 and lateral_speed < 0.5:
             sem_type = SemanticRelType.BLOCKING_PATH
@@ -520,6 +559,182 @@ def infer_semantic_relations(
         )
 
     return rels
+
+
+def mock_sgg_entity_graph(
+    entities: list[TrackedEntity],
+    proximity_threshold: float = 10.0,
+    ego_vx: float = 0.0,
+    ego_vy: float = 0.0,
+) -> list[SceneRelationship]:
+    """Mock the output of a Scene Graph Generation model.
+
+    A real SGG (e.g. Neural Motifs, VCTree, GPSNet) would produce
+    entity-to-entity semantic relationships from visual features.
+    Since no working SGG model was available without dependency conflicts,
+    this function **simulates** that step using kinematic heuristics
+    between every pair of non-ego entities.
+
+    For each pair (A, B) within ``proximity_threshold``, it infers a
+    directional semantic label based on their relative motion:
+
+    * **BLOCKING_PATH** — B is ahead of A and closing in.
+    * **CROSSING** — B has high lateral speed relative to A.
+    * **FOLLOWING** — B is behind A and moving in the same direction.
+    * **MOVING_AWAY** — B is receding from A.
+    * **STATIONARY_SAFE** — B is stationary.
+    * **OCCLUDING** — B is between A and the ego, partially hiding A.
+
+    Returns
+    -------
+    Entity-to-entity ``SceneRelationship`` edges (no ego edges).
+    """
+    rels: list[SceneRelationship] = []
+    non_ego = [e for e in entities if not e.is_ego]
+
+    for i, a in enumerate(non_ego):
+        for b in non_ego[i + 1:]:
+            dx = b.x - a.x
+            dy = b.y - a.y
+            dist = math.sqrt(dx**2 + dy**2)
+            if dist < 1e-9 or dist > proximity_threshold:
+                continue
+
+            # Unit vector from A → B
+            ux, uy = dx / dist, dy / dist
+
+            # --- Classify A → B relationship ---
+            ab_label = _classify_pair(a, b, ux, uy, dist, ego_vx, ego_vy)
+            ab_score, ab_reasoning = mock_llm_evaluate_danger(
+                a.cls, b.cls, ab_label,
+                math.sqrt(b.vx**2 + b.vy**2),
+                _closing_speed(a, b, ux, uy),
+            )
+            rels.append(SceneRelationship(
+                source_id=a.id,
+                target_id=b.id,
+                relation=RelationshipType.NEAR,
+                distance=round(dist, 3),
+                semantic_label=ab_label,
+                danger_modifier=ab_score,
+                reasoning=ab_reasoning,
+            ))
+
+            # --- Classify B → A relationship ---
+            ba_label = _classify_pair(b, a, -ux, -uy, dist, ego_vx, ego_vy)
+            ba_score, ba_reasoning = mock_llm_evaluate_danger(
+                b.cls, a.cls, ba_label,
+                math.sqrt(a.vx**2 + a.vy**2),
+                _closing_speed(b, a, -ux, -uy),
+            )
+            rels.append(SceneRelationship(
+                source_id=b.id,
+                target_id=a.id,
+                relation=RelationshipType.NEAR,
+                distance=round(dist, 3),
+                semantic_label=ba_label,
+                danger_modifier=ba_score,
+                reasoning=ba_reasoning,
+            ))
+
+    return rels
+
+
+def _closing_speed(
+    src: TrackedEntity, tgt: TrackedEntity, ux: float, uy: float
+) -> float:
+    """Relative closing speed of *tgt* towards *src* along the connecting axis."""
+    rel_vx = tgt.vx - src.vx
+    rel_vy = tgt.vy - src.vy
+    return -(rel_vx * ux + rel_vy * uy)
+
+
+def _classify_pair(
+    src: TrackedEntity,
+    tgt: TrackedEntity,
+    ux: float,
+    uy: float,
+    dist: float,
+    ego_vx: float,
+    ego_vy: float,
+) -> SemanticRelType:
+    """Classify the semantic relationship src → tgt in an agricultural context.
+
+    *ux, uy* is the unit vector from src to tgt.
+
+    The classifier combines kinematic cues with entity-class knowledge
+    to produce relations meaningful for an agricultural machine:
+
+    * A human near an animal → HOLDING_LEASH (handler controlling animal).
+    * A fast-moving animal with the ego approaching → FLEEING_FROM.
+    * An entity near mud/ditch terrain → TERRAIN_HAZARD (slip / stuck risk).
+    * A slow animal near a stationary obstacle → SHELTERING_BEHIND.
+    * A very slow animal → GRAZING (calm, low dynamic risk).
+    * Otherwise falls back to kinematic classification (BLOCKING_PATH,
+      CROSSING, FOLLOWING, MOVING_AWAY, STATIONARY_SAFE, OCCLUDING).
+    """
+    _ANIMALS = {"dog", "deer", "animal", "cat", "bird"}
+    _HUMANS = {"human", "person", "child"}
+    _TERRAIN = {"mud", "ditch", "puddle", "water"}
+    _OBSTACLES = {"post", "rock", "cone", "bush", "tree", "fence"}
+
+    rel_vx = tgt.vx - src.vx
+    rel_vy = tgt.vy - src.vy
+    closing = -(rel_vx * ux + rel_vy * uy)
+    lateral = abs(-rel_vx * uy + rel_vy * ux)
+    tgt_speed = math.sqrt(tgt.vx**2 + tgt.vy**2)
+    src_speed = math.sqrt(src.vx**2 + src.vy**2)
+
+    # --- Agricultural semantic rules (checked first) ---
+
+    # Human near animal → handler / leash holder
+    if src.cls in _HUMANS and tgt.cls in _ANIMALS and dist < 3.0:
+        return SemanticRelType.HOLDING_LEASH
+
+    # Animal near human → the animal is being held
+    if src.cls in _ANIMALS and tgt.cls in _HUMANS and dist < 3.0:
+        return SemanticRelType.HOLDING_LEASH
+
+    # Fast-moving animal with ego approaching from behind → fleeing from machine noise
+    if src.cls in _ANIMALS and tgt_speed < 0.1 and src_speed > 0.8:
+        # src is an animal running; check if ego is roughly behind src
+        src_ego_dist = math.sqrt(src.x**2 + src.y**2)
+        if src_ego_dist < 8.0:
+            return SemanticRelType.FLEEING_FROM
+
+    # Entity near terrain hazard (mud, ditch) → terrain risk
+    if tgt.cls in _TERRAIN and dist < 3.0:
+        return SemanticRelType.TERRAIN_HAZARD
+    if src.cls in _TERRAIN and dist < 3.0:
+        return SemanticRelType.TERRAIN_HAZARD
+
+    # Slow animal sheltering behind a stationary obstacle
+    if src.cls in _ANIMALS and tgt.cls in _OBSTACLES and tgt_speed < 0.05 and src_speed < 0.3:
+        return SemanticRelType.SHELTERING_BEHIND
+
+    # Very slow animal → grazing / calm
+    if tgt.cls in _ANIMALS and tgt_speed < 0.15 and dist < 5.0:
+        return SemanticRelType.GRAZING
+
+    # --- Kinematic fallback ---
+
+    # Occlusion check: tgt is between src and ego (origin)
+    src_ego_dist = math.sqrt(src.x**2 + src.y**2)
+    tgt_ego_dist = math.sqrt(tgt.x**2 + tgt.y**2)
+    if tgt_ego_dist < src_ego_dist * 0.8 and dist < src_ego_dist * 0.7:
+        return SemanticRelType.OCCLUDING
+
+    if tgt_speed < 0.05:
+        return SemanticRelType.STATIONARY_SAFE
+    if closing > 0.8 and lateral < 0.5:
+        return SemanticRelType.BLOCKING_PATH
+    if lateral > 0.6:
+        return SemanticRelType.CROSSING
+    if closing < -0.3:
+        return SemanticRelType.MOVING_AWAY
+    if closing > 0:
+        return SemanticRelType.FOLLOWING
+    return SemanticRelType.MOVING_AWAY
 
 
 def collapse_semantic_graph(
