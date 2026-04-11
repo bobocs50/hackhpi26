@@ -61,6 +61,10 @@ function buildAxisRange(values: number[], padding: number, fallback: [number, nu
   return [min - padding, max + padding]
 }
 
+function normalizeTrajectory(data: APFVisualData) {
+  return data.trajectory.filter((point): point is [number, number, number] => Array.isArray(point))
+}
+
 function buildFigure(data: APFVisualData): { traces: PlotTrace[]; layout: PlotLayout } {
   const traces: PlotTrace[] = []
   const surface = normalizeSurface(data)
@@ -68,8 +72,21 @@ function buildFigure(data: APFVisualData): { traces: PlotTrace[]; layout: PlotLa
   const vectorTipZ = 0.18
   const vectorEndX = data.ego_x + data.control_steer_x
   const vectorEndY = data.ego_y + data.control_steer_y
-  const focusX = [data.ego_x, vectorEndX, ...data.entities.map((entity) => entity.x)]
-  const focusY = [data.ego_y, vectorEndY, ...data.entities.map((entity) => entity.y)]
+  const trajectory = normalizeTrajectory(data)
+  const pathOffsetZ =
+    trajectory.length > 0 && trajectory.every((point) => Math.abs(point[2]) < 0.0001) ? 0.04 : 0
+  const focusX = [
+    data.ego_x,
+    vectorEndX,
+    ...data.entities.map((entity) => entity.x),
+    ...trajectory.map((point) => point[0]),
+  ]
+  const focusY = [
+    data.ego_y,
+    vectorEndY,
+    ...data.entities.map((entity) => entity.y),
+    ...trajectory.map((point) => point[1]),
+  ]
   const xRange = buildAxisRange(focusX, 2.6, [-6, 6])
   const yRange = buildAxisRange(focusY, 2.2, [-1, 10])
 
@@ -85,7 +102,7 @@ function buildFigure(data: APFVisualData): { traces: PlotTrace[]; layout: PlotLa
         [0.7, '#d66b3d'],
         [1, '#f5d98b'],
       ],
-      opacity: 0.42,
+      opacity: 0.68,
       showscale: true,
       colorbar: {
         title: 'log₁₊(U)',
@@ -102,8 +119,8 @@ function buildFigure(data: APFVisualData): { traces: PlotTrace[]; layout: PlotLa
         z: {
           show: true,
           usecolormap: false,
-          color: 'rgba(255,255,255,0.18)',
-          width: 1,
+          color: 'rgba(255,255,255,0.56)',
+          width: 1.8,
         },
       },
     })
@@ -181,6 +198,46 @@ function buildFigure(data: APFVisualData): { traces: PlotTrace[]; layout: PlotLa
       `Steering Direction<br>Δθ=${data.delta_theta.toFixed(3)} rad<br>` +
       `V=${data.v_target.toFixed(2)} m/s<extra></extra>`,
   })
+  if (trajectory.length > 1) {
+    traces.push({
+      type: 'scatter3d',
+      mode: 'lines',
+      x: trajectory.map((point) => point[0]),
+      y: trajectory.map((point) => point[1]),
+      z: trajectory.map((point) => point[2] + pathOffsetZ),
+      line: {
+        color: '#facc15',
+        width: 7,
+      },
+      name: 'Suggested Path',
+      hovertemplate: 'Suggested Path<br>x=%{x:.2f}m y=%{y:.2f}m z=%{z:.2f}<extra></extra>',
+    })
+
+    const endpoint = trajectory[trajectory.length - 1]
+    traces.push({
+      type: 'scatter3d',
+      mode: 'markers+text',
+      x: [endpoint[0]],
+      y: [endpoint[1]],
+      z: [endpoint[2] + pathOffsetZ],
+      marker: {
+        size: 8,
+        color: '#fde68a',
+        line: {
+          width: 2,
+          color: '#713f12',
+        },
+      },
+      text: ['Target'],
+      textposition: 'top center',
+      textfont: {
+        size: 10,
+        color: '#fef3c7',
+      },
+      hovertemplate: 'Target<br>x=%{x:.2f}m y=%{y:.2f}m z=%{z:.2f}<extra></extra>',
+      showlegend: false,
+    })
+  }
 
   traces.push({
     type: 'scatter3d',
@@ -259,13 +316,13 @@ function buildFigure(data: APFVisualData): { traces: PlotTrace[]; layout: PlotLa
       },
       aspectmode: 'manual',
       aspectratio: {
-        x: 1.05,
-        y: 1.25,
-        z: 0.72,
+        x: 1.25,
+        y: 1.45,
+        z: 0.78,
       },
       camera: {
-        eye: { x: -0.68, y: -1.02, z: 0.72 },
-        center: { x: -0.06, y: -0.08, z: -0.04 },
+        eye: { x: -1.05, y: -1.4, z: 0.86 },
+        center: { x: -0.05, y: -0.08, z: -0.08 },
       },
     },
   }
