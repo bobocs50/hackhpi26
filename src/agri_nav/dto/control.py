@@ -21,6 +21,8 @@ class VelocityCommand(BaseModel):
     v_target: float = Field(ge=0.0, description="Target velocity [m/s]")
 
 
+from agri_nav.dto.visualization import APFVisualData
+
 class ControlOutput(BaseModel):
     """Combined control output for a single tick."""
 
@@ -28,7 +30,7 @@ class ControlOutput(BaseModel):
 
     steering: SteeringCommand
     velocity: VelocityCommand
-    frontend_viz_json: str | None = Field(
+    visual_data: APFVisualData | None = Field(
         default=None,
-        description="Serialized Plotly Figure JSON for UI rendering, if generated",
+        description="Structured data payload for frontend rendering, if generated",
     )

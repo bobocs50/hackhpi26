@@ -87,6 +87,10 @@ class SceneRelationship(BaseModel):
         default=0.0,
         description="Danger adjustment: positive increases, negative decreases danger",
     )
+    reasoning: str = Field(
+        default="",
+        description="LLM-generated reasoning for the danger score assignment",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +137,8 @@ class TrackedEntity(BaseModel):
         return HomogeneousCoord(x=self.x, y=self.y, w=1.0)
 
 
+from agri_nav.dto.visualization import SGGVisualData
+
 class SGGOutput(BaseModel):
     """Combined output of the SGG inference pipeline."""
 
@@ -140,9 +146,9 @@ class SGGOutput(BaseModel):
 
     nodes: list[TrackedEntity]
     relationships: list[SceneRelationship]
-    frontend_viz_json: str | None = Field(
+    visual_data: SGGVisualData | None = Field(
         default=None,
-        description="Serialized Plotly Figure JSON for UI rendering, if generated",
+        description="Structured data payload for frontend rendering, if generated",
     )
 
 
@@ -420,6 +426,36 @@ def build_scene_graph(
 # ---------------------------------------------------------------------------
 # Semantic relationship inference & graph collapse
 # ---------------------------------------------------------------------------
+
+
+def mock_llm_evaluate_danger(
+    source_cls: str, target_cls: str, sem_type: SemanticRelType, speed: float, closing_speed: float
+) -> tuple[float, str]:
+    """Mock LLM structured evaluation of entity-level danger.
+    
+    Given the classes and kinematic context of two entities, this returns
+    [danger_contribution_score, reasoning].
+    """
+    if sem_type == SemanticRelType.BLOCKING_PATH:
+        score = 0.30
+        reasoning = f"The {target_cls} is directly in the path and moving slowly ({speed:.1f}m/s), creating an immediate obstruction risk."
+    elif sem_type == SemanticRelType.CROSSING:
+        score = 0.25
+        reasoning = f"The {target_cls} is cutting across the trajectory at a high lateral speed, creating a collision risk."
+    elif sem_type == SemanticRelType.FOLLOWING:
+        score = 0.15
+        reasoning = f"The {target_cls} is tailing the {source_cls}; minor risk of rear-end if braking suddenly."
+    elif sem_type == SemanticRelType.MOVING_AWAY:
+        score = -0.20
+        reasoning = f"The {target_cls} is actively increasing its distance from {source_cls} (closing_speed={closing_speed:.1f}m/s), reducing risk."
+    elif sem_type == SemanticRelType.STATIONARY_SAFE:
+        score = -0.15
+        reasoning = f"The {target_cls} is completely stationary (0.0m/s) and off the main path, presenting minimal dynamic risk."
+    else:
+        score = 0.10
+        reasoning = f"The {target_cls} presents a generic hazard to {source_cls}."
+        
+    return score, reasoning
 
 
 def infer_semantic_relations(

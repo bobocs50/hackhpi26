@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from agri_nav.dto.config import SGGConfig
 from agri_nav.dto.perception import KinematicsEntity, SemanticEntity
 from agri_nav.logic.sgg_processor import (
@@ -32,6 +34,7 @@ class SGGService:
         self,
         kinematics: list[KinematicsEntity],
         semantics: list[SemanticEntity],
+        entity_sgg_rels: list[SceneRelationship] | None = None,
         ego_vy: float = 0.0,
         render_viz: bool = False,
     ) -> SGGOutput:
@@ -58,6 +61,10 @@ class SGGService:
 
         # 3. Infer semantic relationships
         semantic_rels = infer_semantic_relations(nodes, ego_vy=ego_vy)
+        
+        # Add external real SGG entity relationships
+        if entity_sgg_rels:
+            semantic_rels.extend(entity_sgg_rels)
 
         # 4. Collapse semantic graph (adjust danger_quality based on semantics)
         collapsed_nodes = collapse_semantic_graph(nodes, semantic_rels)
@@ -66,12 +73,53 @@ class SGGService:
         self._prev_smoothed = {e.id: e.smoothed_certainty for e in collapsed_nodes if not e.is_ego}
 
         # 5. Visualization
-        viz_json = None
+        viz_data = None
         if render_viz:
-            from agri_nav.viz.viz_sgg_graph import plot_scene_graph
-            # Plot using the collapsed nodes and semantic edges
-            fig = plot_scene_graph(collapsed_nodes, semantic_rels, show=False)
-            viz_json = fig.to_json()
+            from agri_nav.dto.visualization import SGGVisualData, SGGNodeViz, SGGEdgeViz, SGGDistanceLineViz
+
+            viz_nodes = []
+            for n in collapsed_nodes:
+                ttc_str = "" if n.is_ego else ("∞" if n.ttc == float("inf") else f"{n.ttc:.1f}s")
+                viz_nodes.append(SGGNodeViz(
+                    id=n.id, cls=n.cls, is_ego=n.is_ego,
+                    x=n.x, y=n.y, vx=n.vx, vy=n.vy,
+                    danger_quality=n.danger_quality,
+                    smoothed_certainty=n.smoothed_certainty,
+                    ttc_label=ttc_str,
+                ))
+
+            viz_edges = []
+            for rel in semantic_rels:
+                try:
+                    src = next(n for n in collapsed_nodes if n.id == rel.source_id)
+                    tgt = next(n for n in collapsed_nodes if n.id == rel.target_id)
+                except StopIteration:
+                    continue  # Safely skip edges pointing to dropped entities
+                
+                color = "#95a5a6"
+                if rel.danger_modifier > 0:
+                    color = "#e74c3c"
+                elif rel.danger_modifier < 0:
+                    color = "#2ecc71"
+
+                viz_edges.append(SGGEdgeViz(
+                    source_x=src.x, source_y=src.y,
+                    target_x=tgt.x, target_y=tgt.y,
+                    label=f"{rel.semantic_label.value} ({rel.danger_modifier:+.2f})",
+                    color=color,
+                ))
+
+            viz_dist_lines = []
+            ego_node = next((n for n in collapsed_nodes if n.is_ego), None)
+            if ego_node:
+                for n in collapsed_nodes:
+                    if not n.is_ego:
+                        dist = math.sqrt((n.x - ego_node.x)**2 + (n.y - ego_node.y)**2)
+                        viz_dist_lines.append(SGGDistanceLineViz(
+                            target_x=n.x, target_y=n.y, distance=dist
+                        ))
+                
+            viz_data = SGGVisualData(nodes=viz_nodes, edges=viz_edges, distance_lines=viz_dist_lines)
 
         # NOTE: APF still needs the area entities that were filtered out from the graph
         # Let's add them back to the nodes list so APF has full knowledge
@@ -81,7 +129,7 @@ class SGGService:
         return SGGOutput(
             nodes=final_nodes,
             relationships=semantic_rels,
-            frontend_viz_json=viz_json,
+            visual_data=viz_data,
         )
 
     def reset(self) -> None:

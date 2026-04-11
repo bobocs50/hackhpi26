@@ -85,6 +85,72 @@ class APFConfig(BaseModel):
         description="Distance [m] at which multiplier = adaptive_rep_min",
     )
 
+    # --- Trajectory prediction regularization ---
+    traj_momentum: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Heading momentum coefficient (0=no inertia, 1=full inertia). "
+            "Blends previous heading change with new steering command."
+        ),
+    )
+    traj_forward_bias: float = Field(
+        default=0.3,
+        ge=0.0,
+        description=(
+            "Attractive pull towards straight-ahead (heading=0). "
+            "Higher values penalize lateral deviation more strongly."
+        ),
+    )
+    traj_heading_damping: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Exponential damping on accumulated heading angular velocity. "
+            "Acts as friction to prevent oscillation."
+        ),
+    )
+    traj_safety_offset: float = Field(
+        default=0.8,
+        ge=0.0,
+        description=(
+            "Vertical offset below the gradient maximum [m]. "
+            "The trajectory follows a contour this far below the peak repulsion, "
+            "acting as an adjustable safety margin."
+        ),
+    )
+    traj_max_potential: float = Field(
+        default=0.05,
+        ge=0.0,
+        description=(
+            "Maximum log1p(U) potential value the vehicle is willing to enter."
+        ),
+    )
+    traj_adam_lr: float = Field(
+        default=0.35,
+        ge=0.01,
+        description="Base spatial step size (learning rate) for the Adam trajectory rollout [m]. Replaces raw v*dt.",
+    )
+    traj_adam_beta1: float = Field(
+        default=0.9,
+        ge=0.0,
+        le=1.0,
+        description="Adam first moment decay (momentum). Smooths the displacement direction.",
+    )
+    traj_adam_beta2: float = Field(
+        default=0.999,
+        ge=0.0,
+        le=1.0,
+        description="Adam second moment decay (variance). Adaptively scales step size based on curvature.",
+    )
+    traj_adam_eps: float = Field(
+        default=1e-8,
+        ge=0.0,
+        description="Adam epsilon to prevent division by zero.",
+    )
+
 
 class SGGConfig(BaseModel):
     """Tunable knobs for Scene-Graph-Generation processing."""

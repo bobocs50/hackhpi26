@@ -29,91 +29,27 @@ from agri_nav.logic import apf_longitudinal as lon
 from agri_nav.logic.sgg_inference import SGGInferenceConfig, infer_semantics
 from agri_nav.logic.sgg_processor import TrackedEntity, merge_perception
 from agri_nav.service.apf_service import APFService, VehicleState
-
-
-# ---------------------------------------------------------------------------
-# Potential field computation
-# ---------------------------------------------------------------------------
-
-
-def compute_potential_surface(
-    x_range: np.ndarray,
-    y_range: np.ndarray,
-    entities: list[TrackedEntity],
-    cfg: APFConfig,
-) -> np.ndarray:
-    """Evaluate the combined repulsive potential on a 2D grid."""
-    X, Y = np.meshgrid(x_range, y_range)
-    Z = np.zeros_like(X)
-
-    for ent in entities:
-        if getattr(ent, "is_ego", False):
-            continue
-        xp, yp = lat.predict_position(ent.x, ent.y, ent.vx, ent.vy, cfg.lookahead_t)
-        dx = X - xp
-        dy = Y - yp
-        dist = np.sqrt(dx**2 + dy**2) + cfg.epsilon
-        decay = np.exp(-cfg.alpha_decay * np.maximum(dy, 0.0))
-
-        if ent.danger_class == DangerClass.CROSSABLE:
-            scale = 0.2
-        elif ent.danger_class == DangerClass.TARGET:
-            scale = 0.0
-        else:
-            scale = 1.0
-
-        Z += scale * (ent.smoothed_certainty * ent.danger_quality / dist) * decay
-
-    return Z
-
+from agri_nav.dto.visualization import APFVisualData
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-_DANGER_COLORS = {
-    DangerClass.MUST_AVOID: "#e74c3c",
-    DangerClass.TARGET: "#f39c12",
-    DangerClass.CROSSABLE: "#2ecc71",
-}
-
 
 def plot_apf_field(
-    entities: list[TrackedEntity],
-    crop_grid: CropOccupancyGrid,
-    vehicle: VehicleState,
-    cfg: APFConfig | None = None,
+    viz_data: APFVisualData,
     *,
-    grid_extent: float = 12.0,
-    grid_resolution: float = 0.25,
     title: str = "APF — 3D Force Field (interactive)",
     show: bool = True,
 ) -> go.Figure:
     """Render the APF potential surface and control vector in interactive 3D."""
-    if cfg is None:
-        cfg = APFConfig()
 
-    # -- Compute force field surface -----------------------------------------
-    x_vals = np.arange(-grid_extent, grid_extent, grid_resolution)
-    y_vals = np.arange(-2, grid_extent * 1.5, grid_resolution)
-    Z_raw = compute_potential_surface(x_vals, y_vals, entities, cfg)
-    Z = np.log1p(Z_raw)
-    X, Y = np.meshgrid(x_vals, y_vals)
-
-    # -- Run APF controller --------------------------------------------------
-    svc = APFService(cfg)
-    out = svc.compute(entities, crop_grid, vehicle)
-
-    # -- Build corridor polygon ----------------------------------------------
-    corridor = lon.build_safety_corridor(
-        vehicle.v_current, cfg.theta_max, cfg.machine_width, cfg.corridor_length_factor
-    )
-    corridor_xy = np.array(corridor.exterior.coords)
-
-    # -- Plotly figure -------------------------------------------------------
     fig = go.Figure()
 
-    # Surface
+    # -- Surface -------------------------------------------------------------
+    X, Y = np.meshgrid(viz_data.x_grid, viz_data.y_grid)
+    Z = np.array(viz_data.z_surface)
+
     fig.add_trace(go.Surface(
         x=X, y=Y, z=Z,
         colorscale="YlOrRd",
@@ -124,72 +60,88 @@ def plot_apf_field(
         hovertemplate="x=%{x:.1f}m  y=%{y:.1f}m<br>U=%{z:.3f}<extra></extra>",
     ))
 
-    # Entity markers
-    for ent in entities:
-        if ent.is_ego:
-            continue
-        xp, yp = lat.predict_position(ent.x, ent.y, ent.vx, ent.vy, cfg.lookahead_t)
-        xi = int((xp + grid_extent) / grid_resolution)
-        yi = int((yp + 2) / grid_resolution)
+    # -- Entity markers ------------------------------------------------------
+    for ent in viz_data.entities:
+        # Interpolate Z surface height for marker text placement
+        xi = int((ent.x + viz_data.extent_x) / (viz_data.x_grid[1] - viz_data.x_grid[0] + 1e-9))
+        yi = int((ent.y + 2) / (viz_data.y_grid[1] - viz_data.y_grid[0] + 1e-9))
         xi = max(0, min(xi, Z.shape[1] - 1))
         yi = max(0, min(yi, Z.shape[0] - 1))
         z_ent = float(Z[yi, xi]) + 0.1
 
-        color = _DANGER_COLORS.get(ent.danger_class, "#95a5a6")
-
         fig.add_trace(go.Scatter3d(
-            x=[xp], y=[yp], z=[z_ent],
+            x=[ent.x], y=[ent.y], z=[z_ent],
             mode="markers+text",
-            marker=dict(size=8, color=color, line=dict(width=1, color="black")),
+            marker=dict(size=8, color=ent.color, line=dict(width=1, color="black")),
             text=[f"{ent.cls} (q={ent.danger_quality:.2f})"],
             textposition="top center",
             textfont=dict(size=9),
             hovertext=[
                 f"<b>{ent.cls}</b> (id={ent.id})<br>"
                 f"q={ent.danger_quality:.3f}  c={ent.smoothed_certainty:.3f}<br>"
-                f"TTC={ent.ttc:.1f}s<br>"
-                f"class={ent.danger_class.value}"
+                f"TTC={ent.ttc_label}<br>"
+                f"class={ent.danger_class}"
             ],
             hoverinfo="text",
             showlegend=False,
         ))
 
-    # Vehicle marker
+    # -- Ego vehicle marker --------------------------------------------------
     fig.add_trace(go.Scatter3d(
-        x=[vehicle.x], y=[vehicle.y], z=[0],
+        x=[viz_data.ego_x], y=[viz_data.ego_y], z=[0],
         mode="markers+text",
         marker=dict(size=12, color="#3498db", symbol="diamond",
                     line=dict(width=2, color="black")),
         text=["EGO"],
         textposition="bottom center",
         textfont=dict(size=11, color="#2980b9"),
-        hovertext=[f"<b>Ego Vehicle</b><br>V={vehicle.v_current:.1f} m/s"],
+        hovertext=[f"<b>Ego Vehicle</b><br>V={viz_data.ego_v:.1f} m/s"],
         hoverinfo="text",
         name="Vehicle",
     ))
 
-    # Control vector
-    steer_x = math.sin(out.steering.delta_theta) * 2.0
-    steer_y = math.cos(out.steering.delta_theta) * out.velocity.v_target
+    # -- Control vector ------------------------------------------------------
     fig.add_trace(go.Scatter3d(
-        x=[vehicle.x, vehicle.x + steer_x],
-        y=[vehicle.y, vehicle.y + steer_y],
+        x=[viz_data.ego_x, viz_data.ego_x + viz_data.control_steer_x],
+        y=[viz_data.ego_y, viz_data.ego_y + viz_data.control_steer_y],
         z=[0, 0],
         mode="lines",
         line=dict(color="#2980b9", width=6),
-        name=f"Δθ={out.steering.delta_theta:.3f} rad, V={out.velocity.v_target:.2f} m/s",
+        name=f"Δθ={viz_data.delta_theta:.3f} rad, V={viz_data.v_target:.2f} m/s",
     ))
 
-    # Safety corridor
-    cx = [c[0] + vehicle.x for c in corridor_xy]
-    cy = [c[1] + vehicle.y for c in corridor_xy]
-    cz = [0] * len(corridor_xy)
+    # -- Safety corridor -----------------------------------------------------
+    cx = [pt[0] for pt in viz_data.corridor_xy]
+    cy = [pt[1] for pt in viz_data.corridor_xy]
+    cz = [0] * len(viz_data.corridor_xy)
     fig.add_trace(go.Scatter3d(
         x=cx, y=cy, z=cz,
         mode="lines",
         line=dict(color="#2c3e50", width=3, dash="dash"),
         name="Safety Corridor",
     ))
+
+    # -- Predicted Trajectory Rollout ----------------------------------------
+    if viz_data.trajectory:
+        tx, ty, tz = [], [], []
+        for pt in viz_data.trajectory:
+            x_pt, y_pt = pt[0], pt[1]
+            xi = int((x_pt + viz_data.extent_x) / (viz_data.x_grid[1] - viz_data.x_grid[0] + 1e-9))
+            yi = int((y_pt + 2) / (viz_data.y_grid[1] - viz_data.y_grid[0] + 1e-9))
+            xi = max(0, min(xi, Z.shape[1] - 1))
+            yi = max(0, min(yi, Z.shape[0] - 1))
+            z_surf = float(Z[yi, xi]) + 0.05
+            tx.append(x_pt)
+            ty.append(y_pt)
+            tz.append(z_surf)
+
+        fig.add_trace(go.Scatter3d(
+            x=tx, y=ty, z=tz,
+            mode="lines+markers",
+            line=dict(color="#8e44ad", width=6, dash="solid"),
+            marker=dict(size=4, color="#8e44ad"),
+            name="Gradient Descent Path",
+        ))
 
     # -- Layout --------------------------------------------------------------
     fig.update_layout(
@@ -216,6 +168,7 @@ def plot_apf_field(
 
 def _demo() -> None:
     """Generate a synthetic scene, infer semantics via TTC, and visualize."""
+    from agri_nav.dto.perception import EntityType
     kins = [
         KinematicsEntity(id=1, cls="human", x=0.5, y=4.0, vx=-0.2, vy=-1.0,
                          detection_confidence=0.95, track_age=25),
@@ -231,7 +184,7 @@ def _demo() -> None:
                          detection_confidence=0.88, track_age=15),
         KinematicsEntity(id=7, cls="crop", x=4.0, y=5.0, vx=0.0, vy=0.0,
                          detection_confidence=0.60, track_age=100,
-                         entity_type="area", extent_x=2.0, extent_y=3.0),
+                         entity_type=EntityType.AREA, extent_x=2.0, extent_y=3.0),
     ]
 
     vehicle = VehicleState(x=0.0, y=0.0, v_current=3.0, heading=0.0)
@@ -253,12 +206,13 @@ def _demo() -> None:
     apf_cfg = APFConfig()
 
     svc = APFService(apf_cfg)
-    out = svc.compute(tracked, crop_grid, vehicle)
+    out = svc.compute(tracked, crop_grid, vehicle, render_viz=True)
+    
     print(f"\nSteering: Δθ = {out.steering.delta_theta:.4f} rad")
     print(f"Velocity: V  = {out.velocity.v_target:.4f} m/s")
 
-    plot_apf_field(tracked, crop_grid, vehicle, apf_cfg)
-
+    if out.visual_data:
+        plot_apf_field(out.visual_data)
 
 if __name__ == "__main__":
     _demo()

@@ -232,8 +232,8 @@ def infer_semantics(
         results.append(
             SemanticEntity(
                 id=kin.id,
-                certainty=round(min(c_i, 1.0), 6),
-                danger_quality=round(min(q_i, 1.0), 6),
+                certainty=round(max(0.0, min(c_i, 1.0)), 6),
+                danger_quality=round(max(0.0, min(q_i, 1.0)), 6),
             )
         )
 
