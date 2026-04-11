@@ -1,4 +1,4 @@
-import { FileText, LayoutDashboard, Upload } from 'lucide-react'
+import { Bot, FileText, LayoutDashboard, Upload } from 'lucide-react'
 
 import mockVisionRun from '../../../data/mockVisionRun.json'
 
@@ -32,6 +32,11 @@ export type VisionFrame = {
     steering_angle_deg: number
     speed_factor: number
     brake_factor: number
+    vectors?: {
+      heading_vector?: Point
+      avoidance_vector?: Point
+      safe_corridor_vector?: Point
+    }
     vector_reasoning?: string[]
   }
   danger_reasoning: {
@@ -70,7 +75,7 @@ export type DetectionBadge = Annotation & {
   color: LevelTheme
 }
 
-export const visionRun = mockVisionRun as VisionRun
+export const visionRun = mockVisionRun as unknown as VisionRun
 
 export const levelTheme = {
   low: {
@@ -150,5 +155,6 @@ export function getAnnotationTheme(label: string) {
 export const navItems = [
   { label: 'Upload', icon: Upload, key: 'upload', enabled: true },
   { label: 'Dashboard', icon: LayoutDashboard, key: 'dashboard', enabled: true },
+  { label: 'Research', icon: Bot, key: 'research', enabled: true },
   { label: 'Report', icon: FileText, key: 'report', enabled: true },
 ] as const

@@ -32,3 +32,13 @@ If `make` is not available, use:
 
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+
+## Current Upload Flow
+
+- `POST /runs/upload-frames`
+  - upload the frame images
+  - backend stores them, marks the run as `processing`, and returns a `run_id`
+- `GET /runs/{run_id}/frames`
+  - inspect the stored frame list for that run
+- `GET /report`
+  - current report endpoint

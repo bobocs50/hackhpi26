@@ -98,9 +98,7 @@ export function ChatPanel({ currentFrame, detectionBadges }: ChatPanelProps) {
   }
 
   return (
-    <aside
-      className="rounded-3xl border border-white/6 bg-[#15171a] shadow-[0_20px_48px_rgba(0,0,0,0.24)] xl:sticky xl:top-5 xl:h-227.25"
-    >
+    <aside className="h-full min-h-[620px] max-w-[880px] rounded-3xl border border-white/6 bg-[#15171a] shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
       <div className="flex h-full flex-col">
         <div className="border-b border-white/6 px-4 py-3">
           <div className="flex items-center gap-3">
@@ -113,11 +111,11 @@ export function ChatPanel({ currentFrame, detectionBadges }: ChatPanelProps) {
           </div>
         </div>
 
-        <div className="flex-1 space-y-2.5 overflow-y-auto px-4 py-3">
+        <div className="flex-1 space-y-2.5 overflow-y-auto px-4 py-3 sm:px-5">
           {messages.map((message) => (
             <article
               key={message.id}
-              className={`max-w-[92%] rounded-2xl border px-3.5 py-2.5 text-sm leading-6 shadow-[0_10px_24px_rgba(0,0,0,0.14)] ${
+              className={`max-w-[85%] rounded-2xl border px-3.5 py-2.5 text-sm leading-6 shadow-[0_10px_24px_rgba(0,0,0,0.14)] ${
                 message.role === 'assistant'
                   ? 'border-white/6 bg-[#111315] text-zinc-200'
                   : 'ml-auto border-[#3b4730] bg-[#232a22] text-[#f2f5e8]'
