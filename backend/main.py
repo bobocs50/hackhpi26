@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 
 import json
 from datetime import UTC, datetime
@@ -14,6 +15,18 @@ from pydantic import BaseModel
 from reporting import build_report_response, load_default_run
 from yolo_tracker import run_yolo_tracker
 
+# Add the project root so `agri_nav` package can be imported
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+
+import numpy as np
+from agri_nav.dto.config import APFConfig, SGGConfig
+from agri_nav.dto.perception import CropOccupancyGrid
+from agri_nav.logic.sgg_inference import SGGInferenceConfig, infer_semantics
+from agri_nav.mapper.tracker_csv import get_latest_frame_entities, parse_tracker_csv
+from agri_nav.service.apf_service import APFService, VehicleState
+from agri_nav.service.sgg_service import SGGService
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="HackHPI Backend", version="0.1.0")
@@ -22,6 +35,11 @@ VISUAL_DATA_FIXTURE = DATA_DIR / "visual_data_fixture.json"
 UPLOADS_DIR = DATA_DIR / "uploads"
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 DEFAULT_RUN = load_default_run()
+
+# -- agri-nav pipeline singletons --
+_sgg_service = SGGService()
+_apf_service = APFService()
+_sgg_inference_cfg = SGGInferenceConfig(ego_vy=3.0)
 
 
 class RunUploadResponse(BaseModel):
@@ -60,8 +78,16 @@ app.add_middleware(
 
 @app.get("/mock-visual-data")
 def get_mock_visual_data() -> dict:
-    with VISUAL_DATA_FIXTURE.open("r", encoding="utf-8") as fixture_file:
-        return json.load(fixture_file)
+    """Return live demo-scene visual data from the agri-nav pipeline.
+
+    Falls back to the static fixture file if the pipeline fails.
+    """
+    try:
+        return _run_demo_pipeline()
+    except Exception:
+        logger.exception("Demo pipeline failed — falling back to fixture")
+        with VISUAL_DATA_FIXTURE.open("r", encoding="utf-8") as fixture_file:
+            return json.load(fixture_file)
 
 
 @app.get("/report")
@@ -146,6 +172,61 @@ def get_run_frames(run_id: str) -> RunFramesResponse:
     )
 
 
+@app.get("/runs/{run_id}/visual-data")
+def get_run_visual_data(run_id: str) -> dict:
+    """Run the full SGG → APF pipeline on tracker output and return visual data.
+
+    Returns ``MockVisualDataResponse`` compatible JSON with
+    ``sggVisualData`` and ``apfVisualData`` keys.
+    """
+    metadata = load_run_metadata_or_404(run_id)
+
+    if metadata.get("tracker_status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Tracker has not finished. Status: {metadata.get('tracker_status')}",
+        )
+
+    # Find the tracker CSV
+    run_dir = get_run_dir(run_id)
+    tracker_dir = run_dir / "tracker"
+    csv_files = list(tracker_dir.glob("*.csv"))
+    if not csv_files:
+        raise HTTPException(status_code=404, detail="No tracker CSV found for this run.")
+    csv_path = csv_files[0]
+
+    # Parse tracker CSV → KinematicsEntity (last frame)
+    kinematics = get_latest_frame_entities(csv_path)
+    if not kinematics:
+        raise HTTPException(status_code=404, detail="No entities detected in tracker output.")
+
+    # Infer semantics (certainty + danger_quality via TTC heuristics)
+    semantics = infer_semantics(kinematics, _sgg_inference_cfg)
+
+    # Run SGG pipeline (merge, classify, build scene graph, viz)
+    sgg_out = _sgg_service.process(kinematics, semantics, ego_vy=3.0, render_viz=True)
+
+    # Build a synthetic crop grid (uniform field for demo)
+    grid_data = np.ones((20, 20))
+    grid_data[:, 14:] = 0.0  # crop edge at column 14
+    crop_grid = CropOccupancyGrid(data=grid_data, resolution=0.5, origin_x=0.0, origin_y=0.0)
+
+    # Run APF pipeline
+    vehicle = VehicleState(x=5.0, y=3.0, v_current=3.0, heading=0.0)
+    apf_out = _apf_service.compute(sgg_out.nodes, crop_grid, vehicle, render_viz=True)
+
+    # Assemble frontend-compatible response
+    response: dict[str, Any] = {"sggVisualData": {}, "apfVisualData": {}}
+
+    if sgg_out.visual_data:
+        response["sggVisualData"] = sgg_out.visual_data.model_dump()
+
+    if apf_out.visual_data:
+        response["apfVisualData"] = apf_out.visual_data.model_dump()
+
+    return response
+
+
 def get_run_dir(run_id: str) -> Path:
     return UPLOADS_DIR / run_id
 
@@ -199,3 +280,36 @@ def sort_frame_names(name: str) -> tuple[str, str]:
     stem = Path(name).stem
     digits = "".join(character for character in stem if character.isdigit())
     return (digits.zfill(12) if digits else stem.lower(), name.lower())
+
+
+# ---------------------------------------------------------------------------
+# Live demo pipeline (uses agri_nav demo scene)
+# ---------------------------------------------------------------------------
+
+
+def _run_demo_pipeline() -> dict[str, Any]:
+    """Run the full SGG → APF pipeline on the canonical demo scene."""
+    from agri_nav.demo_scene import DEMO_KINEMATICS, EGO_VY, make_crop_grid
+
+    # 1. Infer semantics from kinematics
+    cfg = SGGInferenceConfig(ego_vy=EGO_VY)
+    semantics = infer_semantics(DEMO_KINEMATICS, cfg)
+
+    # 2. SGG processing (merge, classify, scene graph, viz)
+    sgg_out = _sgg_service.process(
+        DEMO_KINEMATICS, semantics, ego_vy=EGO_VY, render_viz=True,
+    )
+
+    # 3. APF control + viz
+    crop_grid = make_crop_grid()
+    vehicle = VehicleState(x=5.0, y=3.0, v_current=EGO_VY, heading=0.0)
+    apf_out = _apf_service.compute(
+        sgg_out.nodes, crop_grid, vehicle, render_viz=True,
+    )
+
+    result: dict[str, Any] = {"sggVisualData": {}, "apfVisualData": {}}
+    if sgg_out.visual_data:
+        result["sggVisualData"] = sgg_out.visual_data.model_dump()
+    if apf_out.visual_data:
+        result["apfVisualData"] = apf_out.visual_data.model_dump()
+    return result

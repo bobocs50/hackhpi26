@@ -154,6 +154,27 @@ export async function getRunFrames(runId: string): Promise<RunFramesResponse> {
   return res.json()
 }
 
+export async function getRunVisualData(runId: string): Promise<MockVisualDataResponse> {
+  const res = await fetch(`${BACKEND_URL}/runs/${runId}/visual-data`)
+
+  if (!res.ok) {
+    let message = `Request failed with status ${res.status}`
+
+    try {
+      const data = await res.json()
+      if (typeof data.detail === 'string') {
+        message = data.detail
+      }
+    } catch {
+      // Fall back to the generic message when the response body is not JSON.
+    }
+
+    throw new Error(message)
+  }
+
+  return res.json()
+}
+
 export async function getRunReport(): Promise<RunReportResponse> {
   const res = await fetch(`${BACKEND_URL}/report`)
 
