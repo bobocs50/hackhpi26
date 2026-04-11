@@ -11,9 +11,13 @@ export type RunFramesResponse = {
   run_id: string
   folder_name: string | null
   file_count: number
-  status: 'processing'
+  status: 'processing' | 'completed' | 'failed'
   created_at: string
   updated_at: string
+  tracker_status: 'processing' | 'completed' | 'failed'
+  tracker_started_at: string | null
+  tracker_finished_at: string | null
+  tracker_error: string | null
   frames: string[]
 }
 

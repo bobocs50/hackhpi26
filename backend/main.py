@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from reporting import build_report_response, load_default_run
+from yolo_tracker import run_yolo_tracker
 
 
 app = FastAPI(title="HackHPI Backend", version="0.1.0")
@@ -30,9 +31,13 @@ class RunFramesResponse(BaseModel):
     run_id: str
     folder_name: str | None
     file_count: int
-    status: Literal["processing"]
+    status: Literal["processing", "completed", "failed"]
     created_at: str
     updated_at: str
+    tracker_status: Literal["processing", "completed", "failed"]
+    tracker_started_at: str | None
+    tracker_finished_at: str | None
+    tracker_error: str | None
     frames: list[str]
 
 
@@ -60,6 +65,7 @@ def get_run_report() -> dict:
 
 @app.post("/runs/upload-frames")
 async def upload_run_frames(
+    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
     folder_name: str | None = Form(default=None),
 ) -> RunUploadResponse:
@@ -100,8 +106,13 @@ async def upload_run_frames(
         "created_at": created_at,
         "updated_at": created_at,
         "pipeline_started_at": created_at,
+        "tracker_status": "processing",
+        "tracker_started_at": created_at,
+        "tracker_finished_at": None,
+        "tracker_error": None,
     }
     write_json(run_dir / "metadata.json", metadata)
+    background_tasks.add_task(run_tracker_for_run, run_id)
 
     return RunUploadResponse(
         run_id=run_id,
@@ -121,6 +132,10 @@ def get_run_frames(run_id: str) -> RunFramesResponse:
         status=metadata["status"],
         created_at=metadata["created_at"],
         updated_at=metadata["updated_at"],
+        tracker_status=metadata.get("tracker_status", metadata["status"]),
+        tracker_started_at=metadata.get("tracker_started_at"),
+        tracker_finished_at=metadata.get("tracker_finished_at"),
+        tracker_error=metadata.get("tracker_error"),
         frames=metadata.get("file_names", []),
     )
 
@@ -135,6 +150,30 @@ def load_run_metadata_or_404(run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Run not found.")
 
     return read_json(metadata_path)
+
+
+def run_tracker_for_run(run_id: str) -> None:
+    run_dir = get_run_dir(run_id)
+    metadata = load_run_metadata_or_404(run_id)
+
+    try:
+        tracker_output = run_yolo_tracker(run_dir, run_dir / "tracker")
+        finished_at = utc_now_iso()
+        metadata["status"] = "completed"
+        metadata["updated_at"] = finished_at
+        metadata["tracker_status"] = "completed"
+        metadata["tracker_finished_at"] = finished_at
+        metadata["tracker_error"] = None
+        metadata["tracker_output"] = tracker_output
+    except Exception as exc:
+        finished_at = utc_now_iso()
+        metadata["status"] = "failed"
+        metadata["updated_at"] = finished_at
+        metadata["tracker_status"] = "failed"
+        metadata["tracker_finished_at"] = finished_at
+        metadata["tracker_error"] = str(exc)
+
+    write_json(run_dir / "metadata.json", metadata)
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
