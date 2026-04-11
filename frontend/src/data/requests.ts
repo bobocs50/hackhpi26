@@ -12,6 +12,9 @@ export type RunFramesResponse = {
   folder_name: string | null
   file_count: number
   status: 'processing' | 'completed' | 'failed'
+  pipeline_stage?: string | null
+  final_output_ready?: boolean
+  final_output_generated_at?: string | null
   created_at: string
   updated_at: string
   tracker_status: 'processing' | 'completed' | 'failed'
@@ -41,11 +44,19 @@ export type SGGEdge = {
   target_y: number
   label: string
   color: string
+  reasoning?: string
+}
+
+export type SGGDistanceLine = {
+  target_x: number
+  target_y: number
+  distance: number
 }
 
 export type SGGVisualData = {
   nodes: SGGNode[]
   edges: SGGEdge[]
+  distance_lines: SGGDistanceLine[]
 }
 
 export type APFEntity = {
@@ -82,6 +93,60 @@ export type APFVisualData = {
 export type MockVisualDataResponse = {
   sggVisualData: SGGVisualData
   apfVisualData: APFVisualData
+}
+
+export type UploadedRunDangerEntity = {
+  id: number
+  cls: string
+  dangerQuality: number
+  dangerClass: string
+  ttc: number | null
+}
+
+export type UploadedRunFrameData = {
+  frameIndex: number
+  frameFile: string
+  timestampMs: number
+  steering: {
+    deltaTheta: number
+    controlSteerX: number
+    controlSteerY: number
+  }
+  velocity: {
+    vTarget: number
+    egoV: number
+  }
+  dangerZone: {
+    topEntity: UploadedRunDangerEntity | null
+    entities: UploadedRunDangerEntity[]
+  }
+  reasoning: {
+    summary: string
+    primaryRelation: string | null
+    sourceEntityId: number
+    targetEntityId: number
+  }
+  sggVisualData: SGGVisualData
+  apfVisualData: APFVisualData
+}
+
+export type UploadedRunVisualDataResponse = {
+  runId: string
+  status: 'completed'
+  sourceFrames: {
+    fileCount: number
+    fileNames: string[]
+    samplingFps: number
+  }
+  tracker: {
+    status: string
+    startedAt: string | null
+    finishedAt: string | null
+    error: string | null
+    csvPath: string
+    processedFrames: number
+  }
+  frames: UploadedRunFrameData[]
 }
 
 export type ReportMetadataItem = {
@@ -135,7 +200,6 @@ export async function uploadFrameFolder(
         message = data.detail
       }
     } catch {
-      // Fall back to the generic message when the response body is not JSON.
     }
 
     throw new Error(message)
@@ -154,7 +218,7 @@ export async function getRunFrames(runId: string): Promise<RunFramesResponse> {
   return res.json()
 }
 
-export async function getRunVisualData(runId: string): Promise<MockVisualDataResponse> {
+export async function getRunVisualData(runId: string): Promise<UploadedRunVisualDataResponse> {
   const res = await fetch(`${BACKEND_URL}/runs/${runId}/visual-data`)
 
   if (!res.ok) {
@@ -166,7 +230,6 @@ export async function getRunVisualData(runId: string): Promise<MockVisualDataRes
         message = data.detail
       }
     } catch {
-      // Fall back to the generic message when the response body is not JSON.
     }
 
     throw new Error(message)
@@ -187,7 +250,6 @@ export async function getRunReport(): Promise<RunReportResponse> {
         message = data.detail
       }
     } catch {
-      // Fall back to the generic message when the response body is not JSON.
     }
 
     throw new Error(message)

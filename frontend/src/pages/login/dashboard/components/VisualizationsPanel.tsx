@@ -103,7 +103,7 @@ export function VisualizationsPanel({
     return (
       <VisualizationCard
         title="Interactive Visualizations"
-        description="The dashboard could not load the backend mock payload."
+        description="The dashboard could not load the backend visualization payload."
         badge="Error"
         accent="red"
       >
@@ -115,8 +115,32 @@ export function VisualizationsPanel({
   }
 
   if (!visualData) {
-    return null
+    return (
+      <VisualizationCard
+        title="Interactive Visualizations"
+        description="SGG and APF charts appear only after backend processing finishes for the uploaded run."
+        badge="Waiting"
+        accent="amber"
+      >
+        <div className="flex min-h-[220px] items-center justify-center rounded-2xl border border-white/8 bg-[linear-gradient(180deg,rgba(36,42,33,0.88),rgba(20,24,24,0.92))] px-6 text-center text-sm text-zinc-300">
+          Upload frames and wait for the backend pipeline to produce real SGG and APF data.
+        </div>
+      </VisualizationCard>
+    )
   }
+
+  const sggSignature = [
+    visualData.sggVisualData.nodes.length,
+    visualData.sggVisualData.edges.length,
+    visualData.sggVisualData.nodes.map((node) => `${node.id}:${node.x}:${node.y}`).join('|'),
+  ].join('::')
+
+  const apfSignature = [
+    visualData.apfVisualData.entities.length,
+    visualData.apfVisualData.control_steer_x,
+    visualData.apfVisualData.control_steer_y,
+    visualData.apfVisualData.entities.map((entity) => `${entity.id}:${entity.x}:${entity.y}`).join('|'),
+  ].join('::')
 
   return (
     <section className="grid min-h-0 gap-3 md:grid-cols-2">
@@ -127,7 +151,7 @@ export function VisualizationsPanel({
         accent="moss"
       >
         <div className="h-[250px] overflow-hidden rounded-[1.35rem] border border-[#d8d2c0]/75 bg-[radial-gradient(circle_at_top,rgba(168,181,126,0.16),transparent_40%),linear-gradient(180deg,#f6f2e7_0%,#f2ede0_100%)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] lg:h-[260px] xl:h-[300px] 2xl:h-[380px]">
-          <SGGGraphPlot data={visualData.sggVisualData} />
+          <SGGGraphPlot key={sggSignature} data={visualData.sggVisualData} />
         </div>
       </VisualizationCard>
 
@@ -138,7 +162,7 @@ export function VisualizationsPanel({
         accent="steel"
       >
         <div className="h-[250px] overflow-hidden rounded-[1.35rem] border border-white/8 bg-[radial-gradient(circle_at_top,rgba(122,168,186,0.18),transparent_34%),linear-gradient(180deg,#11161a_0%,#0d1013_100%)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] lg:h-[260px] xl:h-[300px] 2xl:h-[380px]">
-          <APFFieldPlot data={visualData.apfVisualData} />
+          <APFFieldPlot key={apfSignature} data={visualData.apfVisualData} />
         </div>
       </VisualizationCard>
     </section>
