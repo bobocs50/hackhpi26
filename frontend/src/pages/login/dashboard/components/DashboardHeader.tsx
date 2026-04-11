@@ -1,8 +1,8 @@
 import { navItems } from '../data'
 
 type DashboardHeaderProps = {
-  activeView: 'upload' | 'dashboard' | 'report'
-  onSelectView: (view: 'upload' | 'dashboard' | 'report') => void
+  activeView: 'upload' | 'dashboard' | 'research' | 'report'
+  onSelectView: (view: 'upload' | 'dashboard' | 'research' | 'report') => void
 }
 
 export function DashboardHeader({ activeView, onSelectView }: DashboardHeaderProps) {
@@ -21,7 +21,12 @@ export function DashboardHeader({ activeView, onSelectView }: DashboardHeaderPro
                 key={item.label}
                 type="button"
                 onClick={() => {
-                  if (item.key === 'upload' || item.key === 'dashboard' || item.key === 'report') {
+                  if (
+                    item.key === 'upload' ||
+                    item.key === 'dashboard' ||
+                    item.key === 'research' ||
+                    item.key === 'report'
+                  ) {
                     onSelectView(item.key)
                   }
                 }}
